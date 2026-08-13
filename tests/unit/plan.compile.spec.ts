@@ -117,7 +117,7 @@ describe('Loadout Plan v0 (L1)', () => {
     expect(plan.method.status).toBe('experimental');
     expect(plan.method.confidence).toBe('evaluated-experimental-contract-binding-incomplete');
     expect(plan.method.record_digest).toBe(
-      'sha256:f0f68765b20a57b4c70c3dca76adaa0980238d852cd28d3083dd866e8c0e6e8d'
+      'sha256:a9177ac311112f92354ef864d31856183d511133799d59643417503de8ec2b4b'
     );
 
     // COMPATIBILITY

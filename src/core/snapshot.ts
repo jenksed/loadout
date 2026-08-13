@@ -6,6 +6,7 @@
  * observable state without claiming canonical authority.
  */
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -16,7 +17,22 @@ export interface SnapshotInput {
 
 export async function readHeadCommit(repoRoot: string): Promise<string> {
   const headPath = path.join(repoRoot, '.git', 'HEAD');
-  const contents = await fs.readFile(headPath, 'utf8');
+  let contents: string;
+  try {
+    contents = await fs.readFile(headPath, 'utf8');
+  } catch (error) {
+    // A linked Git worktree represents `.git` as a `gitdir: ...` file,
+    // making `<repo>/.git/HEAD` an ENOTDIR path. Ask Git for the exact
+    // commit in that standard layout; this is read-only plumbing.
+    try {
+      return execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).trim();
+    } catch {
+      throw error;
+    }
+  }
   const trimmed = contents.trim();
   if (trimmed.startsWith('ref: ')) {
     const ref = trimmed.slice('ref: '.length);

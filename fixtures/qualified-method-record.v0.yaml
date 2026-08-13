@@ -13,7 +13,7 @@ inputs:
   - repository-state-reference
 outputs:
   - repository-understanding
-procedure_ref: sha256:d1308f3dd8d35cb414935db3e73751f683a3af944e48e8862e206bafb8218ab2
+procedure_ref: sha256:d3b42aaef36e4c7d8c2c10a86aecee228e04a2b84fb22e5bbc920b95fc2fe6e9
 evaluation:
   evidence_refs:
     - project-arsenal@1d239ca262fa2a337897d8f2b4a37104f1506b4e:evaluation/wave5/results/original-16/staged-evidence-graph.json
@@ -36,4 +36,4 @@ evaluation:
   confidence: evaluated-experimental-contract-binding-incomplete
 provenance:
   arsenal_commit: 1d239ca262fa2a337897d8f2b4a37104f1506b4e
-  record_digest: sha256:f0f68765b20a57b4c70c3dca76adaa0980238d852cd28d3083dd866e8c0e6e8d
+  record_digest: sha256:a9177ac311112f92354ef864d31856183d511133799d59643417503de8ec2b4b

@@ -407,7 +407,26 @@ async function readHead(repoRoot: string): Promise<{
   try {
     raw = await fs.readFile(headPath, 'utf8');
   } catch {
-    return { headCommit: '(no HEAD)', headRef: null, isGitRepository: false };
+    // Linked worktrees use a `.git` pointer file, so `.git/HEAD` is not a
+    // traversable path. Resolve the same read-only facts through Git.
+    try {
+      const headCommit = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).trim();
+      let headRef: string | null = null;
+      try {
+        headRef = execFileSync('git', ['-C', repoRoot, 'symbolic-ref', '-q', 'HEAD'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore']
+        }).trim();
+      } catch {
+        // Detached worktree: the commit is still exact; no ref is claimed.
+      }
+      return { headCommit, headRef, isGitRepository: true };
+    } catch {
+      return { headCommit: '(no HEAD)', headRef: null, isGitRepository: false };
+    }
   }
   const trimmed = raw.trim();
   if (trimmed.startsWith('ref: ')) {

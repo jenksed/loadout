@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
-import { snapshotRepo, computeWorkspaceStateDigest } from '../../src/index';
+import { execFileSync } from 'node:child_process';
+import { snapshotRepo, computeWorkspaceStateDigest, runRepositoryRecon } from '../../src/index';
 
 describe('workspace snapshot', () => {
   let repoRoot: string;
@@ -29,5 +30,31 @@ describe('workspace snapshot', () => {
     const d1 = computeWorkspaceStateDigest({ headCommit: 'aaa', trackedPaths: ['a', 'b'] });
     const d2 = computeWorkspaceStateDigest({ headCommit: 'bbb', trackedPaths: ['a', 'b'] });
     expect(d1).not.toBe(d2);
+  });
+
+  it('observes standard linked worktrees where .git is a pointer file', async () => {
+    const source = await fs.mkdtemp(path.join(os.tmpdir(), 'loadout-worktree-source-'));
+    const linked = `${source}-linked`;
+    await fs.writeFile(path.join(source, 'README.md'), '# linked worktree\n');
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: source });
+    execFileSync('git', ['config', 'user.email', 'test@local'], { cwd: source });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: source });
+    execFileSync('git', ['add', 'README.md'], { cwd: source });
+    execFileSync('git', ['commit', '-q', '-m', 'initial'], { cwd: source });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: source,
+      encoding: 'utf8'
+    }).trim();
+    execFileSync('git', ['worktree', 'add', '--detach', linked, head], { cwd: source });
+
+    expect((await fs.stat(path.join(linked, '.git'))).isFile()).toBe(true);
+    const snapshot = await snapshotRepo(linked);
+    const recon = await runRepositoryRecon(linked);
+    expect(snapshot.input.headCommit).toBe(head);
+    expect(recon.repository_state).toMatchObject({
+      head_commit: head,
+      head_ref: null,
+      is_git_repository: true
+    });
   });
 });

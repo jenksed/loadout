@@ -119,7 +119,7 @@ describe('procedure binding (L2)', () => {
     );
     expect(plan.procedure_binding).toBeDefined();
     expect(plan.procedure_binding.qmr_procedure_ref).toBe(
-      'sha256:d1308f3dd8d35cb414935db3e73751f683a3af944e48e8862e206bafb8218ab2'
+      'sha256:d3b42aaef36e4c7d8c2c10a86aecee228e04a2b84fb22e5bbc920b95fc2fe6e9'
     );
     expect(plan.procedure_binding.skill_procedure_entry).toBe('./run.ts');
     expect(plan.procedure_binding.procedure_interface_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -229,7 +229,7 @@ describe('procedure binding (L2)', () => {
     // The plan's qmr_procedure_ref is the productized method digest;
     // the loaded QMR is the alt (sha256:fixture-only-alt). They must mismatch.
     expect(plan.procedure_binding.qmr_procedure_ref).toBe(
-      'sha256:d1308f3dd8d35cb414935db3e73751f683a3af944e48e8862e206bafb8218ab2'
+      'sha256:d3b42aaef36e4c7d8c2c10a86aecee228e04a2b84fb22e5bbc920b95fc2fe6e9'
     );
     expect(altQmr.procedure_ref).toBe('sha256:fixture-only-alt');
     expect(() =>
