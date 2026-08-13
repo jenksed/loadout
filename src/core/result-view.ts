@@ -38,17 +38,20 @@ export interface ResultView {
 
 export function buildResultView(result: RunResultEnvelopeV0): ResultView {
   const simulated = result.simulated?.simulated ?? result.fixture === true;
-  const simulatedReason =
-    result.simulated?.reason ?? 'this run was produced from a v0 fixture; not a real Kiln record.';
+  const simulatedReason = simulated
+    ? (result.simulated?.reason ??
+      'this run was produced from a v0 fixture; not a real Kiln record.')
+    : 'n/a — canonical Run Result Envelope from real Kiln';
+  const provenanceQualifier = simulated ? ' (all simulated)' : '';
 
   const summary =
     `Run ${result.run_id} for Work ${result.work_id} reported status '${result.status}'. ` +
     `Authority requested=${result.authority.requested.length}, granted=${result.authority.granted.length}, ` +
-    `denied=${result.authority.denied.length} (all simulated). ` +
+    `denied=${result.authority.denied.length}${provenanceQualifier}. ` +
     `Proof obligations satisfied=${result.proof_obligations.satisfied.length}, ` +
     `unsatisfied=${result.proof_obligations.unsatisfied.length}, ` +
-    `invalidated=${result.proof_obligations.invalidated.length} (all simulated). ` +
-    `Evidence items=${result.evidence.length} (all simulated). ` +
+    `invalidated=${result.proof_obligations.invalidated.length}${provenanceQualifier}. ` +
+    `Evidence items=${result.evidence.length}${provenanceQualifier}. ` +
     `Acceptance readiness: ${result.acceptance_readiness.ready ? 'ready' : 'NOT ready'}.`;
 
   return {
@@ -83,7 +86,7 @@ export function buildResultView(result: RunResultEnvelopeV0): ResultView {
 
 export function formatResultViewText(view: ResultView): string {
   const lines: string[] = [];
-  lines.push('=== Loadout Result View (SIMULATED) ===');
+  lines.push(`=== Loadout Result View (${view.simulated ? 'SIMULATED' : 'REAL KILN'}) ===`);
   lines.push(`Work ID:        ${view.workId}`);
   lines.push(`Run ID:         ${view.runId}`);
   lines.push(`Status:         ${view.status}`);
@@ -95,7 +98,7 @@ export function formatResultViewText(view: ResultView): string {
   lines.push(`  granted:   ${view.authority.granted.join(', ') || '(none)'}`);
   lines.push(`  denied:    ${view.authority.denied.join(', ') || '(none)'}`);
   lines.push('');
-  lines.push('Evidence (each kind=simulated):');
+  lines.push(view.simulated ? 'Evidence (each kind=simulated):' : 'Evidence (Kiln-authored):');
   for (const e of view.evidence) {
     lines.push(`  - ${e.id} [${e.kind}] digest=${e.stateDigest}`);
     if (e.description) {

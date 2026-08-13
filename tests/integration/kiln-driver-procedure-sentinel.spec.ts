@@ -41,6 +41,7 @@ import {
   submitWorkEnvelopeToKiln,
   invokeProcedure,
   buildResultView,
+  formatResultViewText,
   readPackManifest
 } from '../../src/index';
 import { RunResultEnvelopeV0Schema } from '../../src/core/schemas';
@@ -295,8 +296,13 @@ describe('KilnDriver procedure-invocation sentinel', () => {
       tempDir
     });
     const view = buildResultView(driverResult.envelope);
+    const text = formatResultViewText(view);
     expect(view.simulated).toBe(false);
-    expect(view.simulatedReason).toMatch(/not a real Kiln record/i);
+    expect(view.simulatedReason).toMatch(/canonical Run Result Envelope from real Kiln/i);
+    expect(view.summary).not.toMatch(/all simulated/i);
+    expect(text).toContain('Loadout Result View (REAL KILN)');
+    expect(text).toContain('Evidence (Kiln-authored)');
+    expect(text).not.toContain('each kind=simulated');
   });
 
   it('every envelope from the driver passes RunResultEnvelopeV0Schema validation', async () => {
