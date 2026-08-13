@@ -1,14 +1,14 @@
 {
   "id": "repository-recon",
-  "version": "0.1.0-fixture",
+  "version": "0.2.0",
   "sourcePath": "src/packs/repository-recon",
   "capability": {
     "id": "repository-recon",
     "contract_version": "0.1.0-fixture"
   },
   "skill": {
-    "id": "repository-recon/fixture-method",
+    "id": "repository-recon/staged-evidence-graph",
     "qmr_fixture": "fixtures/qualified-method-record.v0.yaml"
   },
-  "description": "Repository Recon: read-only summary of a local git repository. SIMULATED only."
+  "description": "Repository Recon: deterministic, evidence-bound understanding of a local git repository."
 }

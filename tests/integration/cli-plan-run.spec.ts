@@ -88,7 +88,9 @@ describe('CLI plan/explain', () => {
     expect(out.stdout).toContain('--- Requested Authority');
     expect(out.stdout).toContain('--- Proof Obligations');
     expect(out.stdout).toContain('--- Work Envelope');
-    expect(out.stdout).toContain('--- Repository Recon (structured v1, computed at plan time) ---');
+    expect(out.stdout).toContain(
+      '--- Repository Recon (loadout/repository-recon/v2, computed at plan time) ---'
+    );
     expect(out.stdout).toContain('architecture_anchors:');
     expect(out.stdout).toContain('constraints:');
     expect(out.stdout).toContain('unknowns:');

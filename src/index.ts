@@ -114,12 +114,15 @@ export type {
   PlanMethodProvenanceV0,
   PlanProcedureBindingV0,
   ReconResultV1,
+  ReconResultV2,
+  ReconResult,
+  EvidenceClaimV2,
   ArchitectureAnchorV1,
   ObservedConstraintV1,
   UnknownV1,
   RepositoryStateObservationV1
 } from './core/schemas';
-export { ReconResultV1Schema } from './core/schemas';
+export { ReconResultV1Schema, ReconResultV2Schema, ReconResultSchema } from './core/schemas';
 
 /**
  * Programmatic entry point to the bundled repository-recon procedure.

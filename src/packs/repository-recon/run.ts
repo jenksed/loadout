@@ -36,6 +36,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { buildStagedEvidenceGraph, type EvidenceClaim } from './staged-evidence-graph';
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -139,6 +140,27 @@ export interface ReconResultV1 {
   repository_state: RepositoryStateObservation;
   architecture_anchors: ArchitectureAnchor[];
   constraints: ObservedConstraint[];
+  unknowns: Unknown[];
+  summary: string;
+}
+
+/**
+ * Recon v2 preserves the proven v1 presentation while adding the selected
+ * method's complete, evidence-bound claim graph. `method` identifies the
+ * adopted implementation; it does not claim QMR qualification.
+ */
+export interface ReconResultV2 {
+  schema: 'loadout/repository-recon/v2';
+  method: {
+    id: 'repository-recon/staged-evidence-graph';
+    version: '0.2.0';
+    status: 'experimental';
+  };
+  repository: string;
+  repository_state: RepositoryStateObservation;
+  architecture_anchors: ArchitectureAnchor[];
+  constraints: ObservedConstraint[];
+  evidence_graph: EvidenceClaim[];
   unknowns: Unknown[];
   summary: string;
 }
@@ -814,7 +836,7 @@ async function detectGeneratedBoundaryConstraints(repoRoot: string): Promise<Obs
  * exportName; renaming it requires updating
  * `BUNDLED_PROCEDURES` in `src/core/procedure-registry.ts`.
  */
-export async function runRepositoryRecon(repoRoot: string): Promise<ReconResultV1> {
+export async function runRepositoryRecon(repoRoot: string): Promise<ReconResultV2> {
   const head = await readHead(repoRoot);
 
   const lsFiles = tryGitLsFiles(repoRoot);
@@ -857,6 +879,7 @@ export async function runRepositoryRecon(repoRoot: string): Promise<ReconResultV
   });
   const constraints = allConstraints.slice().sort(sortConstraints);
   const unknowns = allUnknowns.slice().sort(sortUnknowns);
+  const evidenceGraph = await buildStagedEvidenceGraph(repoRoot);
 
   // ----- missing-anchor unknowns (LOD-RR-08) -----
   // If we expected a README but did not find one, that absence is itself
@@ -914,7 +937,12 @@ export async function runRepositoryRecon(repoRoot: string): Promise<ReconResultV
   });
 
   return {
-    schema: 'loadout/repository-recon/v1',
+    schema: 'loadout/repository-recon/v2',
+    method: {
+      id: 'repository-recon/staged-evidence-graph',
+      version: '0.2.0',
+      status: 'experimental'
+    },
     repository: repoRoot,
     repository_state: {
       head_commit: head.headCommit,
@@ -926,6 +954,7 @@ export async function runRepositoryRecon(repoRoot: string): Promise<ReconResultV
     },
     architecture_anchors,
     constraints,
+    evidence_graph: evidenceGraph,
     unknowns: unknowns.slice().sort(sortUnknowns),
     summary
   };
@@ -942,7 +971,7 @@ interface SummaryInput {
 function composeSummary(input: SummaryInput): string {
   const lines: string[] = [];
   lines.push(
-    `Recon v1 of ${input.repository}: ${input.architecture_anchors.length} architecture anchors, ${input.constraints.length} constraints, ${input.unknowns.length} unknowns.`
+    `Recon v2 of ${input.repository}: ${input.architecture_anchors.length} architecture anchors, ${input.constraints.length} constraints, ${input.unknowns.length} unknowns.`
   );
   if (input.repository_state.is_git_repository) {
     lines.push(

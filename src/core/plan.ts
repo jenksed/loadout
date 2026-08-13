@@ -42,7 +42,7 @@ import type { QualifiedMethodRecordV0, WorkEnvelopeV0, LoadoutPlanV0 } from './s
 import { LoadoutPlanV0Schema } from './schemas';
 import { computeProcedureInterfaceDigest } from './procedure-registry';
 import { runRepositoryRecon } from '../packs/repository-recon/run';
-import type { ReconResultV1 } from './schemas';
+import type { ReconResult } from './schemas';
 
 export class PlanError extends Error {
   constructor(message: string) {
@@ -113,13 +113,13 @@ export interface CompileLoadoutPlanArgs {
    */
   packRoot?: string;
   /**
-   * The Repository Recon v1 result. The Plan embeds this so the EXPLAIN
+   * The Repository Recon result. The Plan embeds this so the EXPLAIN
    * view can show the user what recon WOULD produce at plan time. If
    * omitted, the Plan compiler will run the recon procedure itself
    * against `projectState.repository`. Callers that have already run
    * recon (e.g. for caching) may pass the result through.
    */
-  repositoryRecon?: ReconResultV1;
+  repositoryRecon?: ReconResult;
   /**
    * The execution boundary the user selected when planning.
    *   - 'simulated' (default): the Plan will be executed through the
@@ -207,12 +207,12 @@ export async function compileLoadoutPlan(args: CompileLoadoutPlanArgs): Promise<
     args;
   const boundary: 'simulated' | 'kiln' = executionBoundary ?? 'simulated';
 
-  // Compute the Repository Recon v1 result. The Plan embeds this so the
+  // Compute the Repository Recon result. The Plan embeds this so the
   // EXPLAIN view can show the user what recon WOULD produce. If a
   // caller pre-computed recon (e.g. for caching) it can pass the result
   // through; otherwise we run the procedure now. The procedure is
   // deterministic and read-only for fixed repository state.
-  const repositoryRecon: ReconResultV1 =
+  const repositoryRecon: ReconResult =
     args.repositoryRecon ?? (await runRepositoryRecon(args.projectState.repository));
 
   // The compatibility proof is derived from the inputs; it is a
@@ -330,7 +330,7 @@ export async function compileLoadoutPlan(args: CompileLoadoutPlanArgs): Promise<
       '`loadout run --plan <path>` will use the embedded Work Envelope without recomputation.',
       `This Plan is bound to execution_boundary='${boundary}'. The user must honor that boundary at run time: --execution kiln for a kiln-bound plan; --simulate for a simulated-bound plan. A mismatch fails closed.`,
       'If repository state changes, the Plan becomes stale and `loadout run --plan` will refuse to silently re-resolve; re-run `loadout plan` instead.',
-      'The Plan embeds a Repository Recon v1 result computed at plan time. It is part of the content-addressable plan body; any change to the recon result changes the plan_id.'
+      'The Plan embeds a Repository Recon result computed at plan time. It is part of the content-addressable plan body; any change to the recon result changes the plan_id.'
     ]
   };
 
@@ -635,7 +635,7 @@ export function formatPlanText(plan: LoadoutPlanV0): string {
   lines.push(`  base_commit:             ${plan.project_state.base_commit}`);
   lines.push(`  workspace_state_digest:  ${plan.project_state.workspace_state_digest}`);
   lines.push('');
-  lines.push('--- Repository Recon (structured v1, computed at plan time) ---');
+  lines.push(`--- Repository Recon (${plan.repository_recon.schema}, computed at plan time) ---`);
   const recon = plan.repository_recon;
   lines.push(`  schema:                  ${recon.schema}`);
   lines.push(`  repository:              ${recon.repository}`);

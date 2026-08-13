@@ -1,27 +1,39 @@
 schema: engineering-system/qualified-method-record/v0
-fixture: true
-method_id: repository-recon/fixture-method
-method_version: 0.0.0-fixture
+fixture: false
+method_id: repository-recon/staged-evidence-graph
+method_version: 0.2.0
 status: experimental
 qualified_for:
   outcome: understand-a-repository
   contexts:
     - local-git-repository
   exclusions:
-    - this-fixture-does-not-claim-behavioral-qualification
+    - QMR-v0-cannot-canonically-bind-product-target-and-evaluation-adapter
 inputs:
   - repository-state-reference
 outputs:
   - repository-understanding
-procedure_ref: sha256:fixture-only
+procedure_ref: sha256:d1308f3dd8d35cb414935db3e73751f683a3af944e48e8862e206bafb8218ab2
 evaluation:
-  evidence_refs: []
+  evidence_refs:
+    - project-arsenal@1d239ca262fa2a337897d8f2b4a37104f1506b4e:evaluation/wave5/results/original-16/staged-evidence-graph.json
+    - project-arsenal@1d239ca262fa2a337897d8f2b4a37104f1506b4e:evaluation/wave5/results/selection/staged-evidence-graph.json
+    - project-arsenal@1d239ca262fa2a337897d8f2b4a37104f1506b4e:evaluation/wave5/results/holdout/winner.json
   models: []
-  repositories: []
-  observed_strengths: []
+  repositories:
+    - project-arsenal@4dcc1b0fe5c6a198c62b4b130fc9ff7c0e1b15e6
+    - loadout@161946be59960ff8e8a16726ca1dc585abf714ec
+    - kiln@bd2c9bcf715c99ef4f126179c1739c3b031039fc
+    - temper@57e78b576105dc9c4051f133d0b4697b2e35a8a0
+  observed_strengths:
+    - original-product-target-16-of-16-supported
+    - development-and-validation-45-of-45-supported
+    - sealed-temper-holdout-15-of-15-supported
+    - zero-unsupported-factual-claims
+    - deterministic-read-only-output
   observed_failures:
-    - no-real-evaluation-attached
-  confidence: unqualified-fixture
+    - QMR-v0-lacks-canonical-product-target-and-adapter-binding
+  confidence: evaluated-experimental-contract-binding-incomplete
 provenance:
-  arsenal_commit: null
-  record_digest: sha256:fixture-only
+  arsenal_commit: 1d239ca262fa2a337897d8f2b4a37104f1506b4e
+  record_digest: sha256:f0f68765b20a57b4c70c3dca76adaa0980238d852cd28d3083dd866e8c0e6e8d

@@ -230,6 +230,42 @@ export const ReconResultV1Schema = z.object({
 });
 export type ReconResultV1 = z.infer<typeof ReconResultV1Schema>;
 
+export const EvidenceClaimV2Schema = z.object({
+  claim_type: z.enum([
+    'path_presence',
+    'path_absence',
+    'glob_presence',
+    'json_value',
+    'text_reference',
+    'text_contains',
+    'unknown'
+  ]),
+  expected: z.record(z.unknown()),
+  evidence_sources: z.array(z.string()),
+  certainty: z.enum(['observed', 'unknown'])
+});
+export type EvidenceClaimV2 = z.infer<typeof EvidenceClaimV2Schema>;
+
+export const ReconResultV2Schema = z.object({
+  schema: z.literal('loadout/repository-recon/v2'),
+  method: z.object({
+    id: z.literal('repository-recon/staged-evidence-graph'),
+    version: z.literal('0.2.0'),
+    status: z.literal('experimental')
+  }),
+  repository: z.string(),
+  repository_state: RepositoryStateObservationV1Schema,
+  architecture_anchors: z.array(ArchitectureAnchorV1Schema),
+  constraints: z.array(ObservedConstraintV1Schema),
+  evidence_graph: z.array(EvidenceClaimV2Schema),
+  unknowns: z.array(UnknownV1Schema),
+  summary: z.string()
+});
+export type ReconResultV2 = z.infer<typeof ReconResultV2Schema>;
+
+export const ReconResultSchema = z.union([ReconResultV1Schema, ReconResultV2Schema]);
+export type ReconResult = z.infer<typeof ReconResultSchema>;
+
 /* ------------------------- Loadout Plan v0 --------------------------- */
 /**
  * A Loadout Plan v0 is the user-facing, content-addressable description of
@@ -355,7 +391,7 @@ export const LoadoutPlanV0Schema = z.object({
    * produce. Part of the content-addressable plan body, so any change
    * to the recon result changes the plan_id.
    */
-  repository_recon: ReconResultV1Schema,
+  repository_recon: ReconResultSchema,
   notes: z.array(z.string())
 });
 export type LoadoutPlanV0 = z.infer<typeof LoadoutPlanV0Schema>;

@@ -255,7 +255,7 @@ describe('QMR binding (L1)', () => {
     // and the first element carries the QMR's method_id@method_version, not
     // skill id @ min_method_status
     expect(a.envelope.capability.method_provenance[0]).toBe(
-      'repository-recon/fixture-method@0.0.0-fixture'
+      'repository-recon/staged-evidence-graph@0.2.0'
     );
     expect(b.envelope.capability.method_provenance[0]).toBe(
       'repository-recon/alternate-fixture-method@0.0.0-fixture-alt'

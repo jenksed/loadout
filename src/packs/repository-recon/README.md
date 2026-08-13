@@ -5,7 +5,8 @@ The only pack in the LOD-01 vertical slice. Read-only summary of a local git rep
 ## Files
 
 - `pack.json` — pack manifest (id, version, capability binding, skill binding).
-- `capability.json` — stable capability contract (v0.1.0-fixture).
+- `capability.json` — stable capability contract (v0.1.0-fixture; unchanged by Wave 5).
+- `staged-evidence-graph.ts` — the deterministic, read-only Wave 5 method adopted beneath that contract.
 - `skill.json` — swappable skill descriptor; points at a Qualified Method Record fixture.
 - `run.ts` — deterministic local recon procedure (no mutation, no effect driver).
 

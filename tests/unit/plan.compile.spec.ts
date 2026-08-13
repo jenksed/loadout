@@ -107,16 +107,18 @@ describe('Loadout Plan v0 (L1)', () => {
 
     // SKILL / PACK
     expect(plan.pack.id).toBe('repository-recon');
-    expect(plan.pack.version).toBe('0.1.0-fixture');
-    expect(plan.skill.id).toBe('repository-recon/fixture-method');
+    expect(plan.pack.version).toBe('0.2.0');
+    expect(plan.skill.id).toBe('repository-recon/staged-evidence-graph');
     expect(plan.skill.qmr_fixture_path).toBe('fixtures/qualified-method-record.v0.yaml');
 
     // METHOD (QMR)
-    expect(plan.method.method_id).toBe('repository-recon/fixture-method');
-    expect(plan.method.method_version).toBe('0.0.0-fixture');
+    expect(plan.method.method_id).toBe('repository-recon/staged-evidence-graph');
+    expect(plan.method.method_version).toBe('0.2.0');
     expect(plan.method.status).toBe('experimental');
-    expect(plan.method.confidence).toBe('unqualified-fixture');
-    expect(plan.method.record_digest).toBe('sha256:fixture-only');
+    expect(plan.method.confidence).toBe('evaluated-experimental-contract-binding-incomplete');
+    expect(plan.method.record_digest).toBe(
+      'sha256:f0f68765b20a57b4c70c3dca76adaa0980238d852cd28d3083dd866e8c0e6e8d'
+    );
 
     // COMPATIBILITY
     expect(plan.compatibility.min_method_status).toBe('experimental');
@@ -170,10 +172,10 @@ describe('Loadout Plan v0 (L1)', () => {
       capability: a.cap,
       pack: {
         id: 'repository-recon',
-        version: '0.1.0-fixture',
+        version: '0.2.0',
         sourcePath: '',
         capability: { id: 'repository-recon', contract_version: '0.1.0-fixture' },
-        skill: { id: 'repository-recon/fixture-method', qmr_fixture: '' },
+        skill: { id: 'repository-recon/staged-evidence-graph', qmr_fixture: '' },
         description: ''
       },
       qmr: a.qmr,

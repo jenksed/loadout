@@ -158,7 +158,7 @@ describe('Repository Recon v1 (LOD-RR)', () => {
 
   it('LOD-RR-01: a real repository produces architecture anchors', async () => {
     const result = await runRepositoryRecon(repoRoot);
-    expect(result.schema).toBe('loadout/repository-recon/v1');
+    expect(result.schema).toBe('loadout/repository-recon/v2');
     expect(result.architecture_anchors.length).toBeGreaterThan(0);
     // Sanity: the well-known anchors are detected.
     const paths = result.architecture_anchors.map((a) => a.path);
@@ -196,6 +196,32 @@ describe('Repository Recon v1 (LOD-RR)', () => {
   it('LOD-RR-03: observed constraints are separately represented', async () => {
     const result = await runRepositoryRecon(repoRoot);
     expect(result.constraints.length).toBeGreaterThan(0);
+    expect(result.method).toEqual({
+      id: 'repository-recon/staged-evidence-graph',
+      version: '0.2.0',
+      status: 'experimental'
+    });
+    expect(result.evidence_graph.length).toBeGreaterThan(result.architecture_anchors.length);
+    expect(
+      result.evidence_graph.some(
+        (claim) => claim.claim_type === 'path_presence' && claim.expected.path === 'package.json'
+      )
+    ).toBe(true);
+    expect(
+      result.evidence_graph.some(
+        (claim) =>
+          claim.claim_type === 'json_value' &&
+          claim.expected.path === 'package.json' &&
+          claim.expected.pointer === '/name'
+      )
+    ).toBe(true);
+    expect(
+      result.evidence_graph.every(
+        (claim) =>
+          claim.evidence_sources.length > 0 &&
+          (claim.certainty === 'observed' || claim.certainty === 'unknown')
+      )
+    ).toBe(true);
     const constraintKinds = new Set(result.constraints.map((c) => c.kind));
     // The fixtures above include a package.json with engines.node, a
     // package-lock.json, and an AGENTS.md with a mutation prohibition.
@@ -304,6 +330,8 @@ describe('Repository Recon v1 (LOD-RR)', () => {
       [
         'architecture_anchors',
         'constraints',
+        'evidence_graph',
+        'method',
         'repository',
         'repository_state',
         'schema',
@@ -399,10 +427,12 @@ describe('Repository Recon v1 — Plan integration', () => {
       packRoot: PACK_SOURCE_PATH
     });
     expect(plan.repository_recon).toBeDefined();
-    expect(plan.repository_recon.schema).toBe('loadout/repository-recon/v1');
+    expect(plan.repository_recon.schema).toBe('loadout/repository-recon/v2');
     expect(plan.repository_recon.architecture_anchors.length).toBeGreaterThan(0);
     const text = formatPlanText(plan);
-    expect(text).toContain('--- Repository Recon (structured v1, computed at plan time) ---');
+    expect(text).toContain(
+      '--- Repository Recon (loadout/repository-recon/v2, computed at plan time) ---'
+    );
     expect(text).toContain('architecture_anchors:');
     expect(text).toContain('AGENTS.md');
     expect(text).toContain('package.json');
@@ -491,10 +521,10 @@ describe('Repository Recon v1 — schema and shape', () => {
   it('the recon result validates against the published schema', async () => {
     const repoRoot = await makeRepo({});
     const result = await runRepositoryRecon(repoRoot);
-    const { ReconResultV1Schema } = await import('../../src/core/schemas');
+    const { ReconResultV2Schema } = await import('../../src/core/schemas');
     // Must parse without error.
-    const parsed = ReconResultV1Schema.parse(result);
-    expect(parsed.schema).toBe('loadout/repository-recon/v1');
+    const parsed = ReconResultV2Schema.parse(result);
+    expect(parsed.schema).toBe('loadout/repository-recon/v2');
   });
 
   it('the architecture anchor schema rejects an unknown kind', async () => {
