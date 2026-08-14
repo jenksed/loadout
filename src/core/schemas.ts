@@ -286,6 +286,45 @@ export const VerificationCommandV0Schema = z.object({
 });
 export type VerificationCommandV0 = z.infer<typeof VerificationCommandV0Schema>;
 
+/**
+ * Execution Attribution V0 — the mechanical record that ties a
+ * `VerificationChangeV0` to the runtime that produced it.
+ *
+ * Pre-G5-A, Loadout emitted `method.implementation_digest` as a hash over the
+ * Wave 6R2 runtime bundle but compiled the obligation set inline. That
+ * satisfied the digest-binding invariant but did NOT prove the runtime was in
+ * the execution path: an attacker that shipped an inline derivation matching
+ * the digest would still satisfy `promoted artifact present + digest matches`.
+ *
+ * G5-A closes the gap by routing compilation through the runtime's `runCase`
+ * (compiler + adjudicator) and binding the resulting witness digest into the
+ * verification change. Modifying any file under
+ * `loadout/src/core/qualification-runtime/` changes `runtime_bundle_digest`
+ * AND `plan_compiler_digest`, proving the runtime is causally in the path.
+ */
+export const ExecutionAttributionV0Schema = z.object({
+  capability_id: z.literal('verify-change'),
+  capability_version: z.literal('2.0.0-wave6r2'),
+  runtime_bundle_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  runtime_entrypoint: z.literal('loadout/src/core/qualification-runtime/tracer.ts#runCase'),
+  runtime_version: z.literal('v2'),
+  /**
+   * SHA-256 of the (sorted) witness_digest values produced by the runtime
+   * for each selected verification command. The runtime's obligation
+   * compiler runs through `runCase`; the witness digest is over the
+   * canonical content the runtime emits, including its `REGISTRY_DIGEST`,
+   * scope guards, and provider logic. Editing any file in the runtime
+   * bundle changes this digest.
+   */
+  plan_compiler_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /**
+   * SHA-256 of the produced plan JSON (`VerificationChangeV0`). Computed by
+   * `computeVerificationChangeDigest` over the canonicalized change body.
+   */
+  output_plan_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
+});
+export type ExecutionAttributionV0 = z.infer<typeof ExecutionAttributionV0Schema>;
+
 export const VerificationChangeV0Schema = z.object({
   schema: z.literal('loadout/verification-change/v0'),
   method: z.object({
@@ -294,7 +333,10 @@ export const VerificationChangeV0Schema = z.object({
     implementation_digest: z.string(),
     selection_result_digest: z.string(),
     arsenal_commit: z.string(),
-    status: z.literal('evaluated-winner')
+    status: z.literal('evaluated-winner'),
+    promoted_runtime_manifest: z.string(),
+    promoted_runtime_bundle_digest: z.string(),
+    promoted_runtime_source: z.string()
   }),
   change: z.object({
     repository: z.string(),
@@ -323,7 +365,14 @@ export const VerificationChangeV0Schema = z.object({
   ),
   selected_verification: z.array(VerificationCommandV0Schema),
   skipped_verification: z.array(z.object({ command_id: z.string(), rationale: z.string().min(1) })),
-  unknowns: z.array(z.string())
+  unknowns: z.array(z.string()),
+  /**
+   * Execution Attribution V0 — added by G5-A. Records the runtime that
+   * produced this verification change, with mechanical binding to the
+   * runtime bundle and the produced plan. The presence of this field
+   * proves the runtime was used, not merely hashed.
+   */
+  execution_attribution: ExecutionAttributionV0Schema
 });
 export type VerificationChangeV0 = z.infer<typeof VerificationChangeV0Schema>;
 
