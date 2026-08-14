@@ -23,8 +23,8 @@
   "authoritative_claims": {
     "parameter_influence": {
       "command_id": "snapshotRepo",
-      "material_parameters": ["repositoryRoot"],
-      "rationale": "repositoryRoot materializes filesystem_state; the parameter directly influences the snapshot the runtime reads. Any parameter not in this list has no authoritative input-influence claim under this capability."
+      "material_parameters": ["repositoryRoot", "customDigest"],
+      "rationale": "repositoryRoot materializes filesystem_state; the parameter directly influences the snapshot the runtime reads. customDigest (declared material for the G5-B positive exercise fixture) is an ordinarily-named, non-optional parameter; if the diff adds it without binding it in the function body, parameter_usage_finder deterministically refutes it and adjudication routes to NOT_READY. Any parameter not in this list has no authoritative input-influence claim under this capability."
     }
   }
 }
