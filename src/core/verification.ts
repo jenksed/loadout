@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { snapshotRepo } from './snapshot';
@@ -9,14 +9,67 @@ import { VerificationChangeV0Schema } from './schemas';
 
 const execFileAsync = promisify(execFile);
 
+// ---------------------------------------------------------------------------
+// Mechanically-bound implementation digest.
+//
+// The runtime bundle is the set of files in loadout/src/core/qualification-runtime/
+// that the Wave 6R2 verification runtime depends on at load time. Modifying
+// any of those files MUST change the emitted implementation_digest.
+//
+// Canonical recipe (see project-arsenal/evaluation/wave6r2/runtime_manifest_recipe.v2.md):
+//   1. For each file (sorted lexicographically by path):
+//        sha256(file bytes) -> hex
+//   2. Emit each as `sha256sum`-style: `<hex>  <filename>` (two spaces)
+//   3. Concatenate with `\n` and append a trailing `\n`
+//   4. SHA-256 the resulting canonical text
+//
+// Reading bytes is mechanical: the digest is not a literal in source.
+// ---------------------------------------------------------------------------
+
+const RUNTIME_BUNDLE_DIR = path.resolve(__dirname, 'qualification-runtime');
+
+// Assert the promoted runtime bundle is present at load time. This makes the
+// dist/core/verification.js emit depend on the runtime bundle directory
+// existing with the expected artifact set; an absent or corrupted runtime
+// bundle throws at module load rather than silently emitting a stale digest.
+const RUNTIME_BUNDLE_FILES = (() => {
+  const expected = ['provider-contracts.v2.json', 'tracer.ts', 'witness.v0.ts'].slice().sort();
+  const actual = readdirSync(RUNTIME_BUNDLE_DIR).slice().sort();
+  if (expected.length !== actual.length || expected.some((name, index) => name !== actual[index])) {
+    throw new Error(
+      `VERIFY_CHANGE_METHOD runtime bundle mismatch at ${RUNTIME_BUNDLE_DIR}: ` +
+        `expected ${JSON.stringify(expected)}, found ${JSON.stringify(actual)}`
+    );
+  }
+  return expected;
+})();
+
+function sha256Hex(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function runtimeBundleDigest(): string {
+  const lines = RUNTIME_BUNDLE_FILES.map((name) => {
+    const bytes = readFileSync(path.join(RUNTIME_BUNDLE_DIR, name));
+    return `${sha256Hex(bytes)}  ${name}`;
+  });
+  const canonical = `${lines.join('\n')}\n`;
+  return `sha256:${sha256Hex(Buffer.from(canonical, 'utf-8'))}`;
+}
+
+const IMPLEMENTATION_DIGEST = runtimeBundleDigest();
+
 export const VERIFY_CHANGE_METHOD = Object.freeze({
   id: 'verify-change/proof-obligation',
-  version: '1.0.0',
-  implementation_digest: 'sha256:ec329afbb1e6337b8af2edd2a9614a1a034c91e1f3946d757ba1f9970dde5b84',
+  version: '2.0.0-wave6r2',
+  implementation_digest: IMPLEMENTATION_DIGEST,
   selection_result_digest:
     'sha256:18aee8b19bd19dbdedc311779541ce4f4089890bfc9796df4256d27744f6f024',
   arsenal_commit: '865c1114baa513d9869adbccacba4dfeb973b4f2',
-  status: 'evaluated-winner'
+  status: 'evaluated-winner',
+  promoted_runtime_manifest: 'wave6r2-runtime-v2',
+  promoted_runtime_bundle_digest: IMPLEMENTATION_DIGEST,
+  promoted_runtime_source: 'loadout/src/core/qualification-runtime/'
 });
 
 export function computeVerificationChangeDigest(value: VerificationChangeV0): string {

@@ -16,7 +16,15 @@ module.exports = {
     node: true,
     es2022: true
   },
-  ignorePatterns: ['dist', 'node_modules', 'coverage', '.loadout'],
+  ignorePatterns: [
+    'dist',
+    'node_modules',
+    'coverage',
+    '.loadout',
+    // Wave 6R2 qualification runtime bundle: mechanically-bound runtime
+    // artifacts. Linted/hashed, not edited. Excluded from Loadout lint.
+    'src/core/qualification-runtime/**'
+  ],
   rules: {
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     '@typescript-eslint/no-explicit-any': 'error',

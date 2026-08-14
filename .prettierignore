@@ -1,0 +1,8 @@
+dist
+node_modules
+
+# Wave 6R2 qualification runtime bundle: these files are mechanically-bound
+# runtime artifacts. Any change to their byte contents MUST change
+# VERIFY_CHANGE_METHOD.implementation_digest. They are not Loadout source
+# and should not be reformatted by Loadout's prettier config.
+src/core/qualification-runtime

@@ -1,0 +1,155 @@
+{
+  "version": "v2",
+  "schema": "wave6r2.provider-contracts/v2",
+  "generated_at": "2026-08-14",
+  "supports_v1_contract": false,
+  "scope": "Wave6R2 evaluation only; not promoted to a global Kiln Gate or Capability manifest.",
+  "supersedes": "provider-contracts.v1.json (frozen by holdout.v1.json; preserved as Arsenal knowledge)",
+  "asymmetry": {
+    "rule": "sound_for_failure providers must not be invoked on pass-adjudication paths",
+    "rule_2": "sound_for_pass providers must not be invoked on failure-adjudication paths"
+  },
+  "absence_of_counterexample": {
+    "rule": "providers must not issue negative-absence claims without explicit exhaustiveness proof",
+    "application": "registered_command_matcher requires registry-scan termination"
+  },
+  "providers": [
+    {
+      "provider_id": "parameter_usage_finder",
+      "version": "v2",
+      "digest": "sha256:parameter-usage-finder-v2",
+      "supported_domain": {
+        "languages": ["typescript", "javascript"],
+        "kinds": ["function-like declaration"],
+        "required_conditions": [
+          "exact added parameter binding can be resolved",
+          "body can be structurally inspected",
+          "no eval",
+          "no new Function",
+          "no dynamic apply/call",
+          "no generic/type-erased ambiguity",
+          "no unsupported indirection"
+        ]
+      },
+      "supported_languages": ["typescript", "javascript"],
+      "supported_project_kinds": ["loadout"],
+      "supported_claim_kinds": [
+        "newly added parameter is reachable from its function body or from a same-patch test"
+      ],
+      "assumptions": [
+        "TypeScript compiler API binding resolution available",
+        "exact parameter binding identity is determinable from AST"
+      ],
+      "scope": "function_body",
+      "positive_guarantee": "empirical",
+      "negative_guarantee": "bounded_sound_for_failure",
+      "positive_guarantee_meaning": "Observation identifies executable references with high empirical accuracy but no universal completeness claim",
+      "negative_guarantee_meaning": "Refutation holds only within the supported_domain; outside supported_domain → UNKNOWN",
+      "unknown_triggers": [
+        "eval",
+        "new Function",
+        "dynamic apply/call",
+        "generic/type-erased dispatch",
+        "unsupported indirection",
+        "function/parameter not resolvable from provided source"
+      ],
+      "limitations": [
+        "dynamic dispatch (generic types, indirect destructuring, polymorphic calls) cannot be traced",
+        "does not prove universal reachability in future patches",
+        "does not validate runtime dispatch",
+        "does not validate binder-correctness outside the provided TypeScript source; supported_domain is a binding-identity claim bounded to function_body"
+      ],
+      "determinism": "full",
+      "outside_semantics_policy": {
+        "kind": "inconclusive",
+        "reason": "if the parameter is not bound by an authoritative contract, the contribution is inconclusive with unknown dynamic dispatch or unsupported language"
+      }
+    },
+    {
+      "provider_id": "registered_command_matcher",
+      "version": "0.1.0",
+      "digest": "sha256:registered-command-matcher-v0",
+      "supported_languages": ["typescript", "elixir"],
+      "supported_project_kinds": ["loadout", "kiln"],
+      "supported_claim_kinds": [
+        "selected command tuple equals registered tuple for the same command_id under the same repository_profile"
+      ],
+      "assumptions": [
+        "registry is the frozen authority",
+        "patched change does not alter the registry map",
+        "the selected command_id resolves to a tuple whose {executable, argv} fields are byte-identical to the registry entry"
+      ],
+      "scope": "selected inputs — only the specific command_id whose registry identity is being compared",
+      "positive_guarantee": "bounded_sound_for_pass",
+      "negative_guarantee": "sound_for_failure",
+      "limitations": [
+        "does not prove the runtime Command exits 0",
+        "does not prove absence of shell interpretation",
+        "does not validate argv semantics beyond identity",
+        "without constant-folding / binding analysis, cannot trace argv literal indirection"
+      ],
+      "determinism": "strict",
+      "outside_semantics_policy": {
+        "kind": "unknown",
+        "reason": "if command_id is not in the registry, the Contribution is not_applicable and the Claim state is unsupported"
+      },
+      "absence_of_counterexample_requirement": "any negative-absence Claim (e.g. 'no unsupported command_id exists') requires explicit registry-scan termination"
+    },
+    {
+      "provider_id": "fixture_schema_validator",
+      "version": "0.1.0",
+      "digest": "sha256:fixture-schema-validator-v0",
+      "supported_languages": ["yaml", "json"],
+      "supported_project_kinds": ["loadout"],
+      "supported_claim_kinds": [
+        "record_digest field is in the recognized fixture-marker namespace"
+      ],
+      "assumptions": [
+        "YAML parse is deterministic",
+        "the registered fixture-marker set is finite and versioned (v0)",
+        "placeholder pattern is stable"
+      ],
+      "scope": "changed paths — the patched fixture file",
+      "positive_guarantee": "bounded_sound_for_pass",
+      "negative_guarantee": "sound_for_failure",
+      "limitations": [
+        "does not validate runtime QMR semantics",
+        "does not prove digest content matches fixture body",
+        "does not prove digest freshness"
+      ],
+      "determinism": "strict",
+      "outside_semantics_policy": {
+        "kind": "unknown",
+        "reason": "if the file is not under loadout/fixtures/** and is not referenced from plan.ts:51, no obligation is instantiated"
+      }
+    },
+    {
+      "provider_id": "process_spawn_argv_checker",
+      "version": "0.1.0",
+      "digest": "sha256:process-spawn-argv-checker-v0",
+      "supported_languages": ["typescript"],
+      "supported_project_kinds": ["loadout", "kiln"],
+      "supported_claim_kinds": [
+        "every spawn call touched by the change uses argv-as-array and shell:false"
+      ],
+      "assumptions": [
+        "TypeScript compiler API is available",
+        "spawn call sites are reachable via static AST",
+        "the registered-Command model forbids shell interpretation unconditionally"
+      ],
+      "scope": "selected symbols — the patched spawn call sites",
+      "positive_guarantee": "bounded_sound_for_pass",
+      "negative_guarantee": "sound_for_failure",
+      "limitations": [
+        "dynamic dispatch chains (helpers that build args lists) cannot be statically traced",
+        "if the AST is unavailable (parse failure), the Contribution is inconclusive",
+        "without interprocedural dataflow, cannot trace argv through helper builders"
+      ],
+      "determinism": "strict",
+      "outside_semantics_policy": {
+        "kind": "inconclusive",
+        "reason": "if the changed function does not call spawn/exec/execFile, no obligation is instantiated"
+      }
+    }
+  ]
+}
