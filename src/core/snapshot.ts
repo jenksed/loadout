@@ -31,7 +31,9 @@ export async function readHeadCommit(repoRoot: string): Promise<string> {
   } catch (error) {
     // A linked Git worktree represents `.git` as a `gitdir: ...` file,
     // making `<repo>/.git/HEAD` an ENOTDIR path. Ask Git for the exact
-    // commit in that standard layout; this is read-only plumbing.
+    // commit in that standard layout; this is read-only plumbing. Note:
+    // the worktree-aware fallback is what makes the loadout.worktree-regression
+    // proof obligation selectable in `verify-change` plans.
     try {
       return execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
         encoding: 'utf8',

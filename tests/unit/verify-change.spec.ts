@@ -139,6 +139,29 @@ describe('Verify This Change Plan v1', () => {
     expect(result.skipped_verification.length).toBeGreaterThan(0);
   });
 
+  it('derives proof obligation IDs deterministically from the same change-set', async () => {
+    // Proof obligation IDs (`patch-hygiene`, `proof-${commandId}`, etc.) are
+    // produced by pure derivation over (profile, signals, selected commands).
+    // The same bound change-set MUST yield the same IDs and structure on every
+    // invocation. This locks in determinism so a future refactor that, for
+    // example, hoists obligation generation above classification cannot quietly
+    // produce different IDs for the same input.
+    const repository = await makeRepository();
+    await fs.mkdir(path.join(repository, 'src', 'schema'), { recursive: true });
+    await fs.writeFile(
+      path.join(repository, 'src', 'schema', 'producer-consumer.ts'),
+      'export type Producer = { id: string };\n'
+    );
+    execFileSync('git', ['add', '.'], { cwd: repository });
+    execFileSync('git', ['commit', '-q', '-m', 'add contract'], { cwd: repository });
+    const first = await buildVerificationChange({ repository, baseRef: 'HEAD^' });
+    const second = await buildVerificationChange({ repository, baseRef: 'HEAD^' });
+    const firstIds = first.proof_obligations.map((o) => o.id);
+    const secondIds = second.proof_obligations.map((o) => o.id);
+    expect(secondIds).toEqual(firstIds);
+    expect(second.proof_obligations).toEqual(first.proof_obligations);
+  });
+
   it('invokes loadout.contracts via node dist/cli.js, never npm run (sandbox-safe)', async () => {
     const repository = await makeRepository();
     await fs.mkdir(path.join(repository, 'src', 'schema'), { recursive: true });

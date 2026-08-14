@@ -15,6 +15,10 @@
  *   loadout validate-contracts
  *
  * Every command output that contains run results is labeled SIMULATED.
+ *
+ * CLI composition note: when a change touches this file or the bin/workbench
+ * layer, verify-change selects loadout.built-cli-smoke in addition to the
+ * standard loadout.format/lint/typecheck/test/build suite.
  */
 import { Command } from 'commander';
 import path from 'node:path';

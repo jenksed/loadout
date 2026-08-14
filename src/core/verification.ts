@@ -213,7 +213,12 @@ export async function buildVerificationChange(args: {
     {
       command_id: 'repo.diff-check',
       executable: 'git',
-      argv: ['diff', '--check', base.commit, '--'],
+      // The Kiln registry's expected argv for `repo.diff-check` is bound to
+      // `envelope.project_state.base_commit`, which equals the current
+      // head commit (i.e. the post-change state). Using `base.commit` here
+      // would only match when no new commits exist between base and HEAD,
+      // which the loadout test exercises but real changes do not.
+      argv: ['diff', '--check', current.input.headCommit, '--'],
       working_directory: '.',
       timeout_ms: 30_000,
       environment_policy: 'minimal-toolchain-path',

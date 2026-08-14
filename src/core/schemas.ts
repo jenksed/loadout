@@ -32,6 +32,10 @@ export const QualifiedMethodRecordV0Schema = z.object({
   }),
   inputs: z.array(z.string()),
   outputs: z.array(z.string()),
+  // producer/consumer binding: a QMR is accepted only when its qualified_for
+  // and procedure_ref match the verify-change Capability contract; the
+  // downstream verify-change loadout.contracts registered command checks
+  // this binding at run time, not at plan compile time.
   procedure_ref: z.string(),
   evaluation: z.object({
     evidence_refs: z.array(z.string()),
