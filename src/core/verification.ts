@@ -352,43 +352,143 @@ export function extractAddedParametersFromDiff(diffText: string): AddedParameter
   //   async function name(...)
   //   const name = (...) => {...}
   //   const name = function (...) {...}
-  //   name(...) { ... }    // method-style — accepted only when the diff
-  //                          clearly introduces the method.
-  // Note: the caller has already stripped the leading `+`, so the regexes
-  // operate on the bare source line.
+  //
+  // G7: handle multi-line function declarations AND identify which parameters
+  // are NEW (not present in the pre-diff version). Real-world patches
+  // frequently place added parameters on `+` lines that interleave with
+  // unchanged context lines, e.g.:
+  //
+  //    export async function snapshotRepo(
+  //  -  repoRoot: string
+  //  +  repoRoot: string,
+  //  +  _tmpdir?: string
+  //    ): Promise<...>
+  //
+  // A parameter is "added" iff its identifier appears on some `+` line within
+  // the function's parameter list AND does NOT appear on any `-` line in the
+  // same hunk. This catches both the multi-line addition (T3's S04-incomplete
+  // style) and the inline-modification style (a single line that adds a
+  // parameter alongside an existing one).
   const fnPattern =
-    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/;
+    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/;
   const arrowPattern =
-    /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?::\s*[^=]+)?\s*=>/;
+    /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?\(/;
   const fnExprPattern =
-    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/;
-  // New: diff hunk header `+++ b/path/to/file`.
+    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/;
+  // Diff hunk header `+++ b/path/to/file`.
   const filePattern = /^\+\+\+\s+(?:b\/)?(.+)$/;
+  // Hunk header `@@ -A,B +C,D @@`
+  const hunkPattern = /^@@\s+\-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const fileMatch = filePattern.exec(line);
     if (fileMatch) {
       currentFile = fileMatch[1].trim();
       continue;
     }
-    if (!line.startsWith('+') || line.startsWith('+++')) continue;
-    const stripped = line.slice(1);
-    const m =
-      fnPattern.exec(stripped) ?? arrowPattern.exec(stripped) ?? fnExprPattern.exec(stripped);
+    // Skip hunk headers and removed/file lines; we only start extraction from
+    // a line that contains a function declaration. The declaration can be on
+    // a `+`, `-`, or ` ` (context) line — the multi-line parameter list then
+    // extends across subsequent hunk lines until the matching close paren.
+    if (!line || line[0] !== '+' && line[0] !== ' ' && line[0] !== '-') continue;
+    if (hunkPattern.test(line)) continue;
+    const firstChar = line[0];
+    const body = line.slice(1);
+
+    // Find the earliest function declaration marker on this line.
+    const m = fnPattern.exec(body) ?? arrowPattern.exec(body) ?? fnExprPattern.exec(body);
     if (!m) continue;
     const fnName = m[1];
-    const paramsRaw = m[2];
-    const params = splitParameterList(paramsRaw);
-    for (const raw of params) {
-      const parsed = parseParameter(raw);
-      if (!parsed) continue;
-      // Skip `...rest` and destructuring patterns; only count identifier parameters.
+
+    // Walk through the rest of the hunk collecting:
+    //   addedParams: identifiers appearing on `+` lines within the param list
+    //   removedParams: identifiers appearing on `-` lines within the param list
+    // The addedParams minus removedParams is the net new parameter set.
+    const addedParams = new Set<string>();
+    const removedParams = new Set<string>();
+    let parenDepth = 0;
+
+    // Find the open paren in the current line, then walk.
+    const openIdx = body.indexOf('(');
+    if (openIdx === -1) continue;
+    parenDepth = 1;
+
+    function recordFromLineBody(
+      lbody: string,
+      lfirst: string,
+      upper: number
+    ): { closed: boolean; depth: number } {
+      let k = 0;
+      for (; k < lbody.length && k < upper; k++) {
+        const ch = lbody[k];
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
+        if (parenDepth === 0) break;
+      }
+      const slice = lbody.slice(0, k);
+      const params = splitParameterList(slice);
+      for (const raw of params) {
+        const parsed = parseParameter(raw);
+        if (!parsed) continue;
+        if (lfirst === '+') addedParams.add(parsed);
+        else if (lfirst === '-') removedParams.add(parsed);
+      }
+      return { closed: parenDepth === 0, depth: parenDepth };
+    }
+
+    // First line: scan from openIdx+1.
+    let nextJ = i + 1;
+    let closed = false;
+    if (firstChar === '+' || firstChar === '-') {
+      const r = recordFromLineBody(body.slice(openIdx + 1), firstChar, body.length - openIdx - 1);
+      closed = r.closed;
+    } else {
+      // Context line; still scan from openIdx+1 to keep depth tracked, but
+      // do not record params from context lines (they are unchanged).
+      let k = openIdx + 1;
+      for (; k < body.length; k++) {
+        const ch = body[k];
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
+        if (parenDepth === 0) break;
+      }
+      closed = parenDepth === 0;
+    }
+
+    // Continue scanning subsequent lines within the same hunk if the param
+    // list did not close on the first line.
+    let j = nextJ;
+    if (!closed) {
+      for (; j < lines.length; j++) {
+        const l = lines[j];
+        if (l.startsWith('@@') || l.startsWith('+++') || l.startsWith('---')) break;
+        const lfirst = l[0];
+        if (lfirst !== '+' && lfirst !== '-' && lfirst !== ' ') break;
+        const lbody = l.slice(1);
+        const r = recordFromLineBody(lbody, lfirst, lbody.length);
+        if (r.closed) {
+          j++;
+          closed = true;
+          break;
+        }
+      }
+    } else {
+      // Single-line param list; consume just the function-declaration line.
+      j = i + 1;
+    }
+
+    // Compute net new parameters: added but not removed in this hunk.
+    for (const p of addedParams) {
+      if (removedParams.has(p)) continue;
       out.push({
         function_name: fnName,
-        parameter_name: parsed,
+        parameter_name: p,
         source_file: currentFile
       });
     }
+
+    i = j - 1;
   }
 
   out.sort((a, b) => {
@@ -458,6 +558,17 @@ function loadRuntime(): Promise<RuntimeTracerModule> {
       throw new Error(
         `promoted qualification runtime at ${RUNTIME_TRACER_PATH} does not export runCase/adjudicate`
       );
+    }
+    // G7: the runtime's parameter_usage_finder provider relies on the
+    // TypeScript compiler API, which is bootstrapped asynchronously at
+    // tracer module load. The synchronous runCase path requires this
+    // bootstrap to have completed; otherwise the provider falls into the
+    // "no source body available" -> UNKNOWN branch and the G7 disposition
+    // surface collapses from `refutes` to `UNKNOWN`. Awaiting the runtime's
+    // own bootstrap gate here ensures the type-strip loader is ready before
+    // runCase executes.
+    if (typeof mod.ensureTypeScriptLoaded === 'function') {
+      await mod.ensureTypeScriptLoaded();
     }
     return {
       runCase: mod.runCase.bind(mod) as RuntimeTracerModule['runCase'],
@@ -669,6 +780,170 @@ function extractFirstMaterialParam(
   const fn = parts[2];
   const param = parts.slice(3).join('.');
   return { function_name: fn, parameter_name: param };
+}
+
+/**
+ * G7: map a runtime decision/claim_state pair to the canonical disposition
+ * vocabulary used by the verification change. The runtime emits finer-grained
+ * states (`refuted`, `unsupported`, `partially_supported`, `unknown`, ...);
+ * the verification change carries only three outcomes — `supports`,
+ * `refutes`, `UNKNOWN` — because that is the smallest set that maps cleanly
+ * to Kiln's deterministic-validator evidence result:
+ *
+ *   supports  → obligation produces :pass evidence → satisfied (READY path)
+ *   refutes   → obligation produces :fail evidence → invalidated (NOT_READY)
+ *   UNKNOWN   → obligation produces :unknown evidence → unsatisfied/UNKNOWN
+ *
+ * The mapping is intentionally conservative: only `directly_supported` and
+ * `partially_supported` map to `supports`; `refuted` and `contradicted` map to
+ * `refutes`; everything else maps to `UNKNOWN`. This matches the contract
+ * semantics in `reconciled_design.md` row T3 and T4 (AUTHORITATIVE_INPUT_
+ * INFLUENCE → parameter_usage_finder → supports | refutes | unknown).
+ */
+function dispositionFromRuntime(args: {
+  decision: RuntimeWaveDecision | undefined;
+  claim_state: RuntimeClaimState | undefined;
+}): 'supports' | 'refutes' | 'UNKNOWN' {
+  const { claim_state } = args;
+  if (claim_state === 'directly_supported' || claim_state === 'partially_supported') {
+    return 'supports';
+  }
+  if (claim_state === 'refuted' || claim_state === 'contradicted') {
+    return 'refutes';
+  }
+  // unsupported, indirectly_supported, stale, unknown, waived → UNKNOWN.
+  return 'UNKNOWN';
+}
+
+/**
+ * G7: emit one proof_obligations entry per claim decision produced by
+ * `buildObligationContext`. For material parameters, the obligation id is
+ * `proof-authentic-input-influence` and the disposition is whatever the
+ * runtime adjudicated (supports | refutes | UNKNOWN). For non-material
+ * parameters, the obligation id is `proof-scope-guard-uncertainty` and the
+ * disposition is `UNKNOWN` (the honest answer when no authoritative source
+ * declares the parameter material).
+ *
+ * Each emitted obligation carries the G7 audit fields required by the task
+ * (class, proves, required_evidence, keyed_to, authority_ref, disposition).
+ * These are ignored by Kiln's binding (change.ex:obligations_bound? inspects
+ * only id/kind/requirement), so adding them does not change the Kiln
+ * contract.
+ *
+ * The emission is unconditional: every claim_decision produces an obligation,
+ * regardless of the runtime's disposition. Conditional emission (e.g. only
+ * emit when refutes or UNKNOWN) would re-open G7 by hiding a passing Claim
+ * behind disposition-filtered metadata.
+ */
+function buildClaimDerivedObligations(args: {
+  claimDecisions: BuiltObligationContext['claim_decisions'];
+  runtimeDecisions: Array<{
+    command_id: string;
+    decision: RuntimeWaveDecision;
+    claim_state: RuntimeClaimState;
+  }>;
+  capabilityContract: VerifyChangeCapabilityContract;
+  parameterSources: Record<string, string>;
+  repository: string;
+}): VerificationChangeV0['proof_obligations'] {
+  const { claimDecisions, runtimeDecisions, capabilityContract, parameterSources, repository } =
+    args;
+  if (claimDecisions.length === 0) return [];
+
+  // Index runtime decisions by template_id (template_id is the unique key
+  // per obligation template). `compileObligationsViaRuntime` writes
+  // command_id = template_id for each claim obligation it runs.
+  const decisionByTemplate = new Map<
+    string,
+    { decision: RuntimeWaveDecision; claim_state: RuntimeClaimState }
+  >();
+  for (const r of runtimeDecisions) {
+    if (r.command_id.startsWith('OBLIGATION.')) {
+      decisionByTemplate.set(r.command_id, {
+        decision: r.decision,
+        claim_state: r.claim_state
+      });
+    }
+  }
+
+  const authorityRef = `capability_contract:${capabilityContract.id}#authoritative_claims.parameter_influence`;
+
+  const out: VerificationChangeV0['proof_obligations'] = [];
+  for (const decision of claimDecisions) {
+    const templateId = `OBLIGATION.AUTHENTIC_INPUT_INFLUENCE.${decision.function_name}.${decision.parameter_name}`;
+    const runtimeResult = decisionByTemplate.get(templateId);
+    const disposition = dispositionFromRuntime({
+      decision: runtimeResult?.decision,
+      claim_state: runtimeResult?.claim_state
+    });
+    const sourceKey = `${decision.function_name}.${decision.parameter_name}`;
+    const sourceBody = parameterSources[sourceKey] ?? null;
+    const sourceLocation = decision.material
+      ? `loadout/src/core/qualification-runtime/tracer.ts#${decision.function_name}`
+      : null;
+
+    if (decision.material) {
+      // Material parameter: AUTHENTIC_INPUT_INFLUENCE obligation with the
+      // runtime's adjudication disposition.
+      out.push({
+        id: 'proof-authentic-input-influence',
+        kind: 'verification',
+        requirement:
+          `AUTHENTIC_INPUT_INFLUENCE for ${decision.function_name}.${decision.parameter_name} ` +
+          `(material under capability_contract:${capabilityContract.id}); ` +
+          `runtime adjudicated: ${disposition}.`,
+        required_commands: [],
+        class: 'authoritative_claim',
+        proves: decision.parameter_name,
+        required_evidence: sourceBody,
+        keyed_to: {
+          parameter_name: decision.parameter_name,
+          function_name: decision.function_name,
+          source_location: sourceLocation ?? undefined
+        },
+        authority_ref: decision.authority_pointer || authorityRef,
+        disposition
+      });
+    } else {
+      // Non-material parameter: scope-guard uncertainty obligation. The
+      // runtime's no_authority branch emits UNKNOWN unconditionally for
+      // non-material parameters; the disposition is therefore UNKNOWN and
+      // reaches Kiln aggregation as such (UNKNOWN cannot aggregate to READY).
+      //
+      // We use kind="verification" (not "observation") so Kiln's
+      // deterministic-validator evidence path produces :unknown evidence
+      // rather than :pass. The kiln obligation's :unknown result maps to
+      // has_stale_evidence?=true, which causes aggregate_evaluation.value to
+      // be `not_ready` (with reason `stale_evidence`). This is the canonical
+      // representation of "UNKNOWN cannot aggregate to READY" within Kiln's
+      // existing adjudication contract.
+      out.push({
+        id: 'proof-scope-guard-uncertainty',
+        kind: 'verification',
+        requirement:
+          `${decision.function_name}.${decision.parameter_name} is not declared material ` +
+          `under capability_contract:${capabilityContract.id} (no authoritative Claim). ` +
+          `Scope guard routes to UNKNOWN; disposition UNKNOWN reaches Kiln aggregation.`,
+        required_commands: [],
+        class: 'scope_guard',
+        proves: decision.parameter_name,
+        required_evidence: null,
+        keyed_to: {
+          parameter_name: decision.parameter_name,
+          function_name: decision.function_name,
+          source_location: sourceLocation ?? undefined
+        },
+        authority_ref: decision.authority_pointer || authorityRef,
+        disposition: 'UNKNOWN'
+      });
+    }
+  }
+
+  // Suppress unused-param lint on `repository` while keeping the contract
+  // explicit for future extensions (e.g. resolved-path audit fields).
+  void repository;
+
+  return out;
 }
 
 export const VERIFY_CHANGE_METHOD = Object.freeze({
@@ -987,6 +1262,52 @@ export async function buildVerificationChange(args: {
   );
   const plan_compiler_digest = `sha256:${compilerInner}`;
 
+  // -------------------------------------------------------------------------
+  // G7: emit claim-derived obligations as explicit top-level proof_obligations.
+  //
+  // Pre-G7, the authoritative Claim path emitted obligation *templates* to
+  // the runtime tracer and recorded only "unknowns" in the verification change.
+  // The runtime adjudicated each claim (supports/refutes/UNKNOWN) but the
+  // result was never reflected as an obligation that Kiln could route through
+  // its Evidence pipeline. The disposition was lost — the runtime's claim
+  // evaluation lived only in plan_compiler_digest summary metadata, where
+  // Kiln could not consume it.
+  //
+  // G7 closes that gap: for each claim_decision the runtime produced, emit
+  // an explicit proof_obligations entry carrying the runtime's adjudication
+  // disposition. The obligation identity (`proof-authentic-input-influence`
+  // for material parameters, `proof-scope-guard-uncertainty` for non-material
+  // ones) is stable across compilation and execution. The disposition
+  // (`supports | refutes | UNKNOWN`) is recorded on the obligation so Kiln's
+  // deterministic validator produces an Evidence result that maps to
+  // satisfied / invalidated / unknown in the reconstructed envelope.
+  //
+  // The obligation's id/kind/requirement triple is what Kiln's binding
+  // (change.ex:obligations_bound?) compares against the work_envelope proof
+  // obligations; the additional class/proves/required_evidence/keyed_to/
+  // authority_ref/disposition fields are loadout-internal audit metadata
+  // that Kiln ignores by contract. The work_envelope's projection in
+  // compile.ts already strips these out via `.map(({id, kind, requirement}))`,
+  // so the envelope and verification_change remain binding-compatible.
+  //
+  // Invariant: this emission MUST NOT be conditioned on the eventual
+  // disposition. supports, refutes, and UNKNOWN are outcomes of an obligation
+  // that must already exist on the verification change. Conditionally
+  // skipping the obligation when disposition=supports would re-open G7.
+  // -------------------------------------------------------------------------
+  const claimDerivedObligations = buildClaimDerivedObligations({
+    claimDecisions: claimContext.claim_decisions,
+    runtimeDecisions: runtimeCompilation.perObligationDecisions,
+    capabilityContract,
+    parameterSources,
+    repository
+  });
+
+  const finalObligations = [
+    ...typedObligations,
+    ...claimDerivedObligations
+  ] as unknown as VerificationChangeV0['proof_obligations'];
+
   const draft: VerificationChangeV0 = {
     schema: 'loadout/verification-change/v0',
     method: {
@@ -1012,7 +1333,7 @@ export async function buildVerificationChange(args: {
     },
     affected_surfaces: signals.surfaces,
     claims_at_risk: signals.claims,
-    proof_obligations: typedObligations,
+    proof_obligations: finalObligations,
     selected_verification: typedSelectedVerification,
     skipped_verification: typedSkippedVerification,
     unknowns: [

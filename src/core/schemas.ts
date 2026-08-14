@@ -355,7 +355,23 @@ export const VerificationChangeV0Schema = z.object({
       id: z.string(),
       kind: z.string(),
       requirement: z.string(),
-      required_commands: z.array(z.string())
+      required_commands: z.array(z.string()),
+      // Optional fields introduced by G7: each claim-derived obligation
+      // carries its authority pointer, disposition, and audit metadata.
+      // Kiln's binding (change.ex:obligations_bound?) only inspects id/kind/
+      // requirement, so these fields are ignored by the Kiln contract.
+      class: z.string().optional(),
+      proves: z.string().optional(),
+      required_evidence: z.string().nullable().optional(),
+      keyed_to: z
+        .object({
+          parameter_name: z.string().optional(),
+          function_name: z.string().optional(),
+          source_location: z.string().optional()
+        })
+        .optional(),
+      authority_ref: z.string().optional(),
+      disposition: z.enum(['supports', 'refutes', 'UNKNOWN']).optional()
     })
   ),
   selected_verification: z.array(VerificationCommandV0Schema),
