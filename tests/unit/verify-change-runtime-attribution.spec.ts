@@ -24,7 +24,6 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildVerificationChange } from '../../src/index';
-import type { VerificationChangeV0 } from '../../src/index';
 
 const RUNTIME_BUNDLE_DIR = path.resolve(
   __dirname,
@@ -61,26 +60,25 @@ describe('G5-A: verification change execution attribution', () => {
     expect(result.execution_attribution.runtime_version).toBe('v2');
     expect(result.execution_attribution.runtime_bundle_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.execution_attribution.plan_compiler_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(result.execution_attribution.output_plan_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it('propagates the runtime_bundle_digest to plan_compiler_digest AND output_plan_digest', async () => {
+  it('runtime_bundle_digest and plan_compiler_digest are distinct digests', async () => {
     // The `runtime_bundle_digest` is the hash of the runtime source files.
     // The `plan_compiler_digest` is the hash of the witness digests the
-    // runtime emitted. The `output_plan_digest` is the hash of the
-    // verification-change JSON. All three derive mechanically from the
-    // runtime files so they must change in lockstep if the runtime changes.
+    // runtime emitted. Both derive mechanically from the runtime files but
+    // hash different inputs, so they MUST be distinct. (Pre-G5-DigestBoundary
+    // there was also an `output_plan_digest` field; it was removed because
+    // it hashed the plan body containing itself, which would have caused
+    // Loadout/Kiln digest mismatches at the binding check.)
     const repository = await makeRepository();
     const result = await buildVerificationChange({ repository, baseRef: 'HEAD' });
 
     const runtimeDigest = result.execution_attribution.runtime_bundle_digest;
     const compilerDigest = result.execution_attribution.plan_compiler_digest;
-    const outputDigest = result.execution_attribution.output_plan_digest;
 
     expect(runtimeDigest).not.toBe(compilerDigest);
-    expect(outputDigest).not.toBe(compilerDigest);
-    // All three shapes are well-formed and unique.
-    expect(new Set([runtimeDigest, compilerDigest, outputDigest]).size).toBe(3);
+    // Both shapes are well-formed and unique.
+    expect(new Set([runtimeDigest, compilerDigest]).size).toBe(2);
   });
 
   it('changes both runtime_bundle_digest AND plan_compiler_digest when any runtime file changes (causal proof)', async () => {
@@ -237,22 +235,6 @@ describe('G5-A: verification change execution attribution', () => {
 
     // Tidy up.
     await rm(mutated, { recursive: true, force: true });
-  });
-
-  it('output_plan_digest matches the canonical plan digest', async () => {
-    // Mechanical cross-check: `output_plan_digest` MUST equal the SHA-256
-    // of the canonicalized verification-change JSON. If it does not, the
-    // attribution field is not actually the content-address of the plan.
-    const repository = await makeRepository();
-    const result = await buildVerificationChange({ repository, baseRef: 'HEAD' });
-
-    // The exported computeVerificationChangeDigest hashes the canonical
-    // plan body and prefixes `sha256:...`; the attribution field must be
-    // exactly that.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const { computeVerificationChangeDigest } = await import('../../src/core/verification');
-    const recomputed = computeVerificationChangeDigest(result as unknown as VerificationChangeV0);
-    expect(result.execution_attribution.output_plan_digest).toBe(recomputed);
   });
 });
 

@@ -202,7 +202,6 @@ describe('Verify This Change Plan v1', () => {
     expect(result.execution_attribution.runtime_version).toBe('v2');
     expect(result.execution_attribution.runtime_bundle_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.execution_attribution.plan_compiler_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(result.execution_attribution.output_plan_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it('extractAddedParametersFromDiff + buildObligationContext: pure-derivation smoke', async () => {

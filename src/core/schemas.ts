@@ -316,12 +316,7 @@ export const ExecutionAttributionV0Schema = z.object({
    * scope guards, and provider logic. Editing any file in the runtime
    * bundle changes this digest.
    */
-  plan_compiler_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  /**
-   * SHA-256 of the produced plan JSON (`VerificationChangeV0`). Computed by
-   * `computeVerificationChangeDigest` over the canonicalized change body.
-   */
-  output_plan_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
+  plan_compiler_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
 });
 export type ExecutionAttributionV0 = z.infer<typeof ExecutionAttributionV0Schema>;
 

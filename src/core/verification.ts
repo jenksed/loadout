@@ -127,7 +127,6 @@ interface RuntimeObligationTemplate {
     | 'FIXTURE_SCHEMA_INTEGRITY'
     | 'PROCESS_SPAWN_ARGV_ARRAY'
     | 'SYNTHETIC_CONTRADICTION'
-    | 'SYNTHETIC_STALENESS'
     | 'COMMENT_INTENT_CONSISTENCY';
   provider_id: string | null;
   authority_source_id: string;
@@ -686,18 +685,13 @@ export const VERIFY_CHANGE_METHOD = Object.freeze({
 });
 
 export function computeVerificationChangeDigest(value: VerificationChangeV0): string {
-  // Canonical content-address: hash the verification change body excluding
-  // `execution_attribution.output_plan_digest`. If we hashed the full body,
-  // the digest field would be a function of itself (a circular dependency):
-  // any change to the plan body would change the digest stored in
-  // `output_plan_digest`, which would then change the digest. Excluding the
-  // field makes the digest the content-address of the rest of the body.
+  // Canonical content-address: hash the canonicalized verification change
+  // body. The body has no self-referential fields: `output_plan_digest`
+  // was removed in G5-DigestBoundary because it hashed the plan body
+  // containing itself. The remaining attribution fields
+  // (`runtime_bundle_digest`, `plan_compiler_digest`, etc.) are externally
+  // supplied and are not functions of the body they sit inside.
   const body = { ...value } as Record<string, unknown>;
-  if (body.execution_attribution && typeof body.execution_attribution === 'object') {
-    const attr = { ...(body.execution_attribution as Record<string, unknown>) };
-    attr.output_plan_digest = '';
-    body.execution_attribution = attr;
-  }
   return `sha256:${createHash('sha256')
     .update(JSON.stringify(sortDeep(body)))
     .digest('hex')}`;
@@ -1036,11 +1030,9 @@ export async function buildVerificationChange(args: {
       runtime_bundle_digest: IMPLEMENTATION_DIGEST,
       runtime_entrypoint: 'loadout/src/core/qualification-runtime/tracer.ts#runCase',
       runtime_version: 'v2',
-      plan_compiler_digest,
-      output_plan_digest: '' // filled in below once the plan body is canonical
+      plan_compiler_digest
     }
   };
-  draft.execution_attribution.output_plan_digest = computeVerificationChangeDigest(draft);
   return VerificationChangeV0Schema.parse(draft);
 }
 

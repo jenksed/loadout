@@ -1,0 +1,112 @@
+{
+  "expected_digest": "sha256:34cfc988880d3dc3f6127ff5000207bb698c0b929117031fcd67c1c997f4cdb4",
+  "canonical_bytes": "{\"affected_surfaces\":[\"source\"],\"change\":{\"base_state\":{\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"ref\":\"HEAD\"},\"changed_files\":[\"src/cli.ts\"],\"current_state\":{\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"workspace_state_digest\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"patch_digest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"repository\":\"/example/repo\",\"repository_profile\":\"typescript-node\",\"workspace_state\":{\"clean\":true,\"status_entries\":[]}},\"claims_at_risk\":[],\"execution_attribution\":{\"capability_id\":\"verify-change\",\"capability_version\":\"2.0.0-wave6r2\",\"plan_compiler_digest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"runtime_bundle_digest\":\"sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690\",\"runtime_entrypoint\":\"loadout/src/core/qualification-runtime/tracer.ts#runCase\",\"runtime_version\":\"v2\"},\"method\":{\"arsenal_commit\":\"865c1114baa513d9869adbccacba4dfeb973b4f2\",\"id\":\"verify-change/proof-obligation\",\"implementation_digest\":\"sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690\",\"promoted_runtime_bundle_digest\":\"sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690\",\"promoted_runtime_manifest\":\"wave6r2-runtime-v2\",\"promoted_runtime_source\":\"loadout/src/core/qualification-runtime/\",\"selection_result_digest\":\"sha256:18aee8b19bd19dbdedc311779541ce4f4089890bfc9796df4256d27744f6f024\",\"status\":\"evaluated-winner\",\"version\":\"2.0.0-wave6r2\"},\"proof_obligations\":[{\"id\":\"patch-hygiene\",\"kind\":\"PATCH_HYGIENE\",\"required_commands\":[\"repo.diff-check\"],\"requirement\":\"patch is well-formed\"}],\"schema\":\"loadout/verification-change/v0\",\"selected_verification\":[{\"argv\":[\"diff\",\"--check\",\"HEAD\",\"--\"],\"command_id\":\"repo.diff-check\",\"environment_policy\":\"minimal-toolchain-path\",\"executable\":\"git\",\"mutation_expectation\":\"none\",\"network_policy\":\"not-required\",\"proves\":[\"patch-hygiene\"],\"rationale\":\"Every change must prove the patch has no whitespace errors.\",\"timeout_ms\":30000,\"working_directory\":\".\"}],\"skipped_verification\":[{\"command_id\":\"loadout.test\",\"rationale\":\"no source changes affecting test files\"}],\"unknowns\":[]}",
+  "canonical_field_list": [
+    "affected_surfaces",
+    "change",
+    "claims_at_risk",
+    "execution_attribution",
+    "method",
+    "proof_obligations",
+    "schema",
+    "selected_verification",
+    "skipped_verification",
+    "unknowns"
+  ],
+  "forbidden_field_list": [
+    "output_plan_digest"
+  ],
+  "canonical_attribution_fields": [
+    "capability_id",
+    "capability_version",
+    "plan_compiler_digest",
+    "runtime_bundle_digest",
+    "runtime_entrypoint",
+    "runtime_version"
+  ],
+  "contract": "digest = sha256(canonical_json(attrs)) where canonical_json sorts object keys, emits no insignificant whitespace, and accepts only JSON primitives. Both Loadout (JSON.stringify(sortDeep(body))) and Kiln (Kiln.Store.Canonical.encode/1) produce the same canonical bytes for the same logical value.",
+  "fixture": {
+    "schema": "loadout/verification-change/v0",
+    "method": {
+      "id": "verify-change/proof-obligation",
+      "version": "2.0.0-wave6r2",
+      "implementation_digest": "sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690",
+      "selection_result_digest": "sha256:18aee8b19bd19dbdedc311779541ce4f4089890bfc9796df4256d27744f6f024",
+      "arsenal_commit": "865c1114baa513d9869adbccacba4dfeb973b4f2",
+      "status": "evaluated-winner",
+      "promoted_runtime_manifest": "wave6r2-runtime-v2",
+      "promoted_runtime_bundle_digest": "sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690",
+      "promoted_runtime_source": "loadout/src/core/qualification-runtime/"
+    },
+    "change": {
+      "repository": "/example/repo",
+      "repository_profile": "typescript-node",
+      "base_state": {
+        "ref": "HEAD",
+        "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "current_state": {
+        "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "workspace_state_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "changed_files": [
+        "src/cli.ts"
+      ],
+      "patch_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "workspace_state": {
+        "clean": true,
+        "status_entries": []
+      }
+    },
+    "affected_surfaces": [
+      "source"
+    ],
+    "claims_at_risk": [],
+    "proof_obligations": [
+      {
+        "id": "patch-hygiene",
+        "kind": "PATCH_HYGIENE",
+        "requirement": "patch is well-formed",
+        "required_commands": [
+          "repo.diff-check"
+        ]
+      }
+    ],
+    "selected_verification": [
+      {
+        "command_id": "repo.diff-check",
+        "executable": "git",
+        "argv": [
+          "diff",
+          "--check",
+          "HEAD",
+          "--"
+        ],
+        "working_directory": ".",
+        "timeout_ms": 30000,
+        "environment_policy": "minimal-toolchain-path",
+        "network_policy": "not-required",
+        "mutation_expectation": "none",
+        "proves": [
+          "patch-hygiene"
+        ],
+        "rationale": "Every change must prove the patch has no whitespace errors."
+      }
+    ],
+    "skipped_verification": [
+      {
+        "command_id": "loadout.test",
+        "rationale": "no source changes affecting test files"
+      }
+    ],
+    "unknowns": [],
+    "execution_attribution": {
+      "capability_id": "verify-change",
+      "capability_version": "2.0.0-wave6r2",
+      "runtime_bundle_digest": "sha256:7528513f16863330a8f69a4c554fec0e37a22de7994465e99962532bc6ea1690",
+      "runtime_entrypoint": "loadout/src/core/qualification-runtime/tracer.ts#runCase",
+      "runtime_version": "v2",
+      "plan_compiler_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}
