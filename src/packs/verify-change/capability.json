@@ -19,5 +19,12 @@
   "compatibility": {
     "min_method_status": "experimental",
     "accepted_contexts": ["local-git-repository"]
+  },
+  "authoritative_claims": {
+    "parameter_influence": {
+      "command_id": "snapshotRepo",
+      "material_parameters": ["repositoryRoot"],
+      "rationale": "repositoryRoot materializes filesystem_state; the parameter directly influences the snapshot the runtime reads. Any parameter not in this list has no authoritative input-influence claim under this capability."
+    }
   }
 }

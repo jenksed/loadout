@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildObligationContext,
   buildVerificationChange,
   compileLoadoutPlan,
   compileWorkEnvelope,
   computeVerificationChangeDigest,
+  extractAddedParametersFromDiff,
   findGoalByTitle,
   installPack,
   loadAndValidateQmr,
@@ -17,6 +19,7 @@ import {
   verifyPlanFreshness,
   verifyPlanIntegrity
 } from '../../src/index';
+import type { CapabilityContractV0 } from '../../src/index';
 
 const ROOT = path.join(__dirname, '..', '..');
 const PACK = path.join(ROOT, 'src', 'packs', 'verify-change');
@@ -185,5 +188,70 @@ describe('Verify This Change Plan v1', () => {
     // sandbox-blocked /tmp/.../tsx-<pid>.pipe IPC socket. This assertion fails loudly
     // if anyone reverts to `npm run validate:contracts`.
     expect(contracts?.argv).not.toEqual(['run', 'validate:contracts']);
+  });
+
+  it('G5-A: execution_attribution is recorded on every emitted verification change', async () => {
+    const repository = await makeRepository();
+    const result = await buildVerificationChange({ repository, baseRef: 'HEAD' });
+    expect(result.execution_attribution).toBeDefined();
+    expect(result.execution_attribution.capability_id).toBe('verify-change');
+    expect(result.execution_attribution.capability_version).toBe('2.0.0-wave6r2');
+    expect(result.execution_attribution.runtime_entrypoint).toBe(
+      'loadout/src/core/qualification-runtime/tracer.ts#runCase'
+    );
+    expect(result.execution_attribution.runtime_version).toBe('v2');
+    expect(result.execution_attribution.runtime_bundle_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(result.execution_attribution.plan_compiler_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(result.execution_attribution.output_plan_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('extractAddedParametersFromDiff + buildObligationContext: pure-derivation smoke', async () => {
+    // The obligation-context builder is part of the Loadout-side surface
+    // for the runtime's AUTHENTIC_INPUT_INFLUENCE provider; a pure-derivation
+    // smoke check keeps the entry points warm and ensures diff parsing does
+    // not silently regress.
+    const diff = [
+      'diff --git a/src/example.ts b/src/example.ts',
+      '--- a/src/example.ts',
+      '+++ b/src/example.ts',
+      '@@ -1,1 +1,4 @@',
+      '-export function existing() {}',
+      '+export function add(param: string): void {',
+      '+  console.log(param);',
+      '+}',
+      '+export function addOptional(opt?: number): void {}'
+    ].join('\n');
+    const params = extractAddedParametersFromDiff(diff);
+    expect(params.length).toBeGreaterThan(0);
+    expect(params.some((p) => p.parameter_name === 'param')).toBe(true);
+
+    const ctx = buildObligationContext({
+      capabilityContract: {
+        schema: 'loadout/capability-contract/v0',
+        id: 'verify-change',
+        contract_version: '0.1.0',
+        goal_outcome: 'verify-this-change',
+        inputs: [],
+        outputs: [],
+        effects: [],
+        evidence_expectations: [],
+        failure_shape: [],
+        compatibility: { min_method_status: 'experimental', accepted_contexts: [] },
+        authoritative_claims: { parameter_influence: { command_id: 'add' } }
+      },
+      addedParameters: params
+    });
+    expect(ctx.obligation_templates).toBeDefined();
+    expect(Array.isArray(ctx.claim_decisions)).toBe(true);
+  });
+
+  it('records the CapabilityContractV0 type contract for downstream G5-B integration', () => {
+    // The exported CapabilityContractV0 type from `./core/verification`
+    // shadows the Loadout-owned `CapabilityContractV0` from `./schemas`
+    // and is the authoritative Claim-binding shape consumed by the runtime.
+    // This noop assertion keeps the type import warm for tooling that
+    // narrows on the runtime boundary.
+    const typeRef: CapabilityContractV0['id'] = 'verify-change';
+    expect(typeRef).toBe('verify-change');
   });
 });

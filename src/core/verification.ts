@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promises as fs, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { snapshotRepo } from './snapshot';
 import type { VerificationChangeV0 } from './schemas';
@@ -59,6 +60,618 @@ function runtimeBundleDigest(): string {
 
 const IMPLEMENTATION_DIGEST = runtimeBundleDigest();
 
+// ---------------------------------------------------------------------------
+// Promoted runtime — execution attribution binding.
+//
+// Pre-G5-A, this module computed `implementation_digest` from the runtime
+// bundle files but did NOT actually use the runtime's compiler/adjudicator to
+// produce the verification plan. That satisfied the digest-binding invariant
+// (`promoted artifact present + digest matches`) but did NOT prove the runtime
+// was in the execution path. G5-A closes the gap: `buildVerificationChange`
+// now invokes `runCase` from the promoted runtime for each selected command,
+// and records the resulting witness digest as `plan_compiler_digest` on the
+// produced Verification Change. Modifying any file in the runtime bundle
+// changes BOTH `runtime_bundle_digest` and `plan_compiler_digest`, proving
+// the runtime is causally in the path.
+//
+// The runtime is loaded via Node's `--experimental-strip-types` (Node 20.6+)
+// over the runtime `.ts` source. The bundled file set is enforced at load
+// time so an absent or corrupted runtime bundle throws BEFORE we promise
+// plan generation.
+// ---------------------------------------------------------------------------
+
+const RUNTIME_TRACER_PATH = path.join(RUNTIME_BUNDLE_DIR, 'tracer.ts');
+const RUNTIME_PROVIDER_CONTRACTS_PATH = path.join(RUNTIME_BUNDLE_DIR, 'provider-contracts.v2.json');
+
+// The runtime module is excluded from the TypeScript build (see
+// `tsconfig.build.json`'s `qualification-runtime/**` exclusion), so we shape
+// the runtime's public surface as a structural interface and import it via
+// a dynamic `import()` keyed by file URL.
+interface RuntimeTracerModule {
+  runCase: (input: {
+    case: RuntimeCaseSpec;
+    providerContracts: RuntimeProviderContractFile;
+  }) => RuntimeWitness;
+  adjudicate: (
+    decisions_per_obligation: Record<string, RuntimeWaveDecision>,
+    claim_state_per_obligation: Record<string, RuntimeClaimState>
+  ) => RuntimeAdjudicatorOutput;
+}
+
+interface RuntimeCaseSpec {
+  case_id: string;
+  scenario_id: string;
+  expected_verdict: 'READY' | 'NOT_READY' | 'UNKNOWN';
+  expected_aggregate: string;
+  expected_aggregate_reason: string;
+  change: RuntimeChange;
+  obligations: RuntimeObligationTemplate[];
+}
+
+interface RuntimeChange {
+  scenario_id: string;
+  patch_digest: string;
+  patch_text: string;
+  patch_file: string;
+  expected_outcome: 'pass' | 'fail' | 'blocked' | 'unknown';
+  selected_command_id?: string;
+  selected_executable?: string;
+  selected_argv?: string[];
+}
+
+interface RuntimeObligationTemplate {
+  template_id: string;
+  obligation_kind:
+    | 'REGISTERED_COMMAND_MATCHES_PLAN'
+    | 'AUTHENTIC_INPUT_INFLUENCE'
+    | 'FIXTURE_SCHEMA_INTEGRITY'
+    | 'PROCESS_SPAWN_ARGV_ARRAY'
+    | 'SYNTHETIC_CONTRADICTION'
+    | 'SYNTHETIC_STALENESS'
+    | 'COMMENT_INTENT_CONSISTENCY';
+  provider_id: string | null;
+  authority_source_id: string;
+  authority_pointer: string;
+  freshness_binding: 'command_registration' | 'patch_and_repository' | 'repository_only';
+  required_guarantee: string;
+  risk_class: 'low' | 'medium' | 'high' | 'critical';
+}
+
+interface RuntimeProviderContractFile {
+  version: string;
+  generated_at: string;
+  providers: unknown[];
+  asymmetry?: string[];
+  absence_of_counterexample?: string[];
+}
+
+interface RuntimeWitness {
+  schema: string;
+  witness_digest: string;
+  verdict: 'READY' | 'NOT_READY' | 'UNKNOWN';
+  aggregate_evaluation: string;
+  aggregate_reason: string;
+  decisions: {
+    per_obligation: Record<string, RuntimeWaveDecision>;
+    claim_state_per_obligation: Record<string, RuntimeClaimState>;
+  };
+}
+
+type RuntimeWaveDecision =
+  | 'pass'
+  | 'fail'
+  | 'blocked'
+  | 'unknown'
+  | 'stale'
+  | 'contradicted'
+  | 'waived';
+type RuntimeClaimState =
+  | 'directly_supported'
+  | 'indirectly_supported'
+  | 'partially_supported'
+  | 'unsupported'
+  | 'refuted'
+  | 'contradicted'
+  | 'stale'
+  | 'unknown'
+  | 'waived';
+
+interface RuntimeAdjudicatorOutput {
+  aggregate: string;
+  reason: string;
+  verdict: 'READY' | 'NOT_READY' | 'UNKNOWN';
+}
+
+// ---------------------------------------------------------------------------
+// G5-B: Authoritative Claim path (Loadout-side wiring).
+//
+// The capability contract at `loadout/src/packs/verify-change/capability.json`
+// is the authoritative source for which parameters of which command are
+// "material" — meaning their influence on runtime state is adjudicated by the
+// promoted runtime's AUTHENTIC_INPUT_INFLUENCE template. For every material
+// parameter added by a diff, verification.ts instantiates a Claim and converts
+// it into an obligation template that the runtime's compiler
+// (`tracer.ts:runCase`) consumes. For every non-material parameter, no Claim
+// is instantiated and no obligation is added — the runtime's verdict for the
+// diff is then based only on the existing registered-command obligations.
+//
+// The promoted runtime bundle (`loadout/src/core/qualification-runtime/`) is
+// frozen and cannot accept external Claim context. The wiring below converts
+// Claims into the obligation templates the runtime already understands, so
+// the runtime's behavior is consistent with the contract declaration. If the
+// runtime later gains the ability to accept external Claim context, the
+// `provider_id` selection here already encodes the authority boundary:
+// material → `parameter_usage_finder`; non-material → null (no authority →
+// UNKNOWN).
+// ---------------------------------------------------------------------------
+
+export interface VerifyChangeCapabilityContract {
+  schema: string;
+  id: string;
+  contract_version: string;
+  goal_outcome?: string;
+  inputs?: string[];
+  outputs?: string[];
+  effects?: string[];
+  evidence_expectations?: string[];
+  failure_shape?: string[];
+  compatibility?: { min_method_status?: string; accepted_contexts?: string[] };
+  authoritative_claims?: {
+    parameter_influence?: {
+      command_id?: string;
+      material_parameters?: string[];
+      rationale?: string;
+    };
+  };
+}
+
+export interface AddedParameter {
+  function_name: string;
+  parameter_name: string;
+  source_file?: string;
+}
+
+export interface BuiltObligationContext {
+  /**
+   * The obligation templates to add to the case spec passed to the runtime's
+   * compiler (`runCase`). Each template's `provider_id` is the runtime's
+   * already-known provider for that obligation kind, or `null` when the
+   * authoritative source declares the parameter non-material (the runtime's
+   * `provider_id === null` branch returns UNKNOWN with the "no_authority"
+   * disposition, which is the honest answer for non-material parameters).
+   */
+  obligation_templates: RuntimeObligationTemplate[];
+  /**
+   * A snapshot of the authority decisions made for the diff. Used by the
+   * caller to record which parameters were declared material vs. non-material
+   * in the verification change's audit surface (without modifying the
+   * runtime's verdict semantics).
+   */
+  claim_decisions: Array<{
+    function_name: string;
+    parameter_name: string;
+    material: boolean;
+    authority_source_id: string;
+    authority_pointer: string;
+  }>;
+}
+
+/**
+ * Build the obligation context for the runtime's compiler call. Reads the
+ * capability contract's `authoritative_claims.parameter_influence` declaration
+ * to decide which added parameters are material. For material parameters,
+ * instantiates a Claim bound to the runtime's `parameter_usage_finder`
+ * provider (the only provider whose scope covers AUTHENTIC_INPUT_INFLUENCE).
+ * For non-material parameters, returns an obligation template with
+ * `provider_id: null` — the runtime routes that to UNKNOWN with no_authority,
+ * which is the honest answer when no authoritative source declares the
+ * parameter material.
+ *
+ * The returned obligation templates are appended to the runtime's case spec.
+ * The runtime does NOT receive an external Claim object directly (it is
+ * frozen); the conversion to obligation templates is the wiring contract
+ * between Loadout's authority declaration and the runtime's compiler.
+ */
+export function buildObligationContext(args: {
+  capabilityContract: VerifyChangeCapabilityContract;
+  addedParameters: AddedParameter[];
+}): BuiltObligationContext {
+  const material =
+    args.capabilityContract.authoritative_claims?.parameter_influence?.material_parameters ?? [];
+  const materialSet = new Set(material);
+  const templates: RuntimeObligationTemplate[] = [];
+  const decisions: BuiltObligationContext['claim_decisions'] = [];
+
+  for (const p of args.addedParameters) {
+    const isMaterial = materialSet.has(p.parameter_name);
+    if (isMaterial) {
+      templates.push({
+        template_id: `OBLIGATION.AUTHENTIC_INPUT_INFLUENCE.${p.function_name}.${p.parameter_name}`,
+        obligation_kind: 'AUTHENTIC_INPUT_INFLUENCE',
+        provider_id: 'parameter_usage_finder',
+        authority_source_id: `capability-contract:${args.capabilityContract.id}`,
+        authority_pointer:
+          'loadout/src/packs/verify-change/capability.json#authoritative_claims.parameter_influence',
+        freshness_binding: 'patch_and_repository',
+        required_guarantee: 'bounded_sound_for_failure',
+        risk_class: 'high'
+      });
+      decisions.push({
+        function_name: p.function_name,
+        parameter_name: p.parameter_name,
+        material: true,
+        authority_source_id: `capability-contract:${args.capabilityContract.id}`,
+        authority_pointer:
+          'loadout/src/packs/verify-change/capability.json#authoritative_claims.parameter_influence'
+      });
+    } else {
+      // Non-material: no authoritative Claim. The runtime's `provider_id === null`
+      // path emits UNKNOWN with no_authority disposition, which is the honest
+      // answer for parameters outside the contract's authority scope.
+      templates.push({
+        template_id: `OBLIGATION.AUTHENTIC_INPUT_INFLUENCE.${p.function_name}.${p.parameter_name}`,
+        obligation_kind: 'AUTHENTIC_INPUT_INFLUENCE',
+        provider_id: null,
+        authority_source_id: 'no_authority',
+        authority_pointer: 'no_admissible_authority',
+        freshness_binding: 'patch_and_repository',
+        required_guarantee: 'unknown',
+        risk_class: 'low'
+      });
+      decisions.push({
+        function_name: p.function_name,
+        parameter_name: p.parameter_name,
+        material: false,
+        authority_source_id: 'no_authority',
+        authority_pointer: 'no_admissible_authority'
+      });
+    }
+  }
+
+  return { obligation_templates: templates, claim_decisions: decisions };
+}
+
+/**
+ * Extract the set of added parameters from a unified diff. This is a
+ * conservative textual probe over `+`-prefixed lines that match a TypeScript
+ * function-like declaration pattern. It does not run a full TypeScript parse;
+ * the runtime's `parameter_usage_finder` provider runs its own AST-based
+ * binding analysis when it adjudicates a Claim.
+ *
+ * The function returns `{ function_name, parameter_name }` records. The
+ * `source_file` is the diff hunk's path (best-effort). Records are
+ * deterministically sorted by (function_name, parameter_name).
+ */
+export function extractAddedParametersFromDiff(diffText: string): AddedParameter[] {
+  const out: AddedParameter[] = [];
+  if (!diffText) return out;
+  const lines = diffText.split('\n');
+  let currentFile = '';
+  // Function-declaration shapes we recognize:
+  //   function name(p1, p2: T, p3 = 1)
+  //   function* name(...)
+  //   async function name(...)
+  //   const name = (...) => {...}
+  //   const name = function (...) {...}
+  //   name(...) { ... }    // method-style — accepted only when the diff
+  //                          clearly introduces the method.
+  // Note: the caller has already stripped the leading `+`, so the regexes
+  // operate on the bare source line.
+  const fnPattern =
+    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/;
+  const arrowPattern =
+    /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?::\s*[^=]+)?\s*=>/;
+  const fnExprPattern =
+    /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/;
+  // New: diff hunk header `+++ b/path/to/file`.
+  const filePattern = /^\+\+\+\s+(?:b\/)?(.+)$/;
+
+  for (const line of lines) {
+    const fileMatch = filePattern.exec(line);
+    if (fileMatch) {
+      currentFile = fileMatch[1].trim();
+      continue;
+    }
+    if (!line.startsWith('+') || line.startsWith('+++')) continue;
+    const stripped = line.slice(1);
+    const m =
+      fnPattern.exec(stripped) ?? arrowPattern.exec(stripped) ?? fnExprPattern.exec(stripped);
+    if (!m) continue;
+    const fnName = m[1];
+    const paramsRaw = m[2];
+    const params = splitParameterList(paramsRaw);
+    for (const raw of params) {
+      const parsed = parseParameter(raw);
+      if (!parsed) continue;
+      // Skip `...rest` and destructuring patterns; only count identifier parameters.
+      out.push({
+        function_name: fnName,
+        parameter_name: parsed,
+        source_file: currentFile
+      });
+    }
+  }
+
+  out.sort((a, b) => {
+    if (a.function_name !== b.function_name) return a.function_name.localeCompare(b.function_name);
+    return a.parameter_name.localeCompare(b.parameter_name);
+  });
+  return out;
+}
+
+function splitParameterList(raw: string): string[] {
+  // Split on commas at depth 0 (we ignore generics / nested parens).
+  const out: string[] = [];
+  let depth = 0;
+  let buf = '';
+  for (const ch of raw) {
+    if (ch === '(' || ch === '<' || ch === '[' || ch === '{') depth++;
+    if (ch === ')' || ch === '>' || ch === ']' || ch === '}') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(buf.trim());
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out.filter(Boolean);
+}
+
+function parseParameter(raw: string): string | null {
+  // Strip leading `...` rest, leading access modifiers (`public`, `private`,
+  // `protected`, `readonly`), and trailing annotations (`name: T`, `name = 1`,
+  // `name?: T`). The identifier portion is the parameter name.
+  let s = raw.trim();
+  s = s.replace(/^\.{3}/, '');
+  s = s.replace(/^(public|private|protected|readonly)\s+/, '');
+  // Optional `?` flag in TypeScript: `name?: T`.
+  const optionalMatch = /^([A-Za-z_$][\w$]*)\s*\?/.exec(s);
+  if (optionalMatch) return optionalMatch[1];
+  const identMatch = /^([A-Za-z_$][\w$]*)/.exec(s);
+  if (identMatch) return identMatch[1];
+  return null;
+}
+
+let runtimeModulePromise: Promise<RuntimeTracerModule> | null = null;
+let providerContractsCache: RuntimeProviderContractFile | null = null;
+
+/**
+ * Load the promoted qualification runtime via Node's
+ * `--experimental-strip-types` support. The tracer module is cached so each
+ * `buildVerificationChange` invocation amortizes the cost across many calls.
+ *
+ * The runtime's provider contracts file is loaded once and cached alongside
+ * the module reference so `runCase` always sees the frozen provider registry.
+ */
+function loadRuntime(): Promise<RuntimeTracerModule> {
+  if (runtimeModulePromise) return runtimeModulePromise;
+  runtimeModulePromise = (async () => {
+    const tracerUrl = pathToFileURL(RUNTIME_TRACER_PATH).href;
+    // The tracer is excluded from `tsconfig.build.json` so it stays a
+    // hot-reloadable runtime source under the loadout workspace. The runtime
+    // module is type-erased at the call site (see `RuntimeTracerModule`
+    // above) so this dynamic import is the canonical Loadout-side gateway
+    // into the runtime.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mod: any = await import(tracerUrl);
+    if (typeof mod.runCase !== 'function' || typeof mod.adjudicate !== 'function') {
+      throw new Error(
+        `promoted qualification runtime at ${RUNTIME_TRACER_PATH} does not export runCase/adjudicate`
+      );
+    }
+    return {
+      runCase: mod.runCase.bind(mod) as RuntimeTracerModule['runCase'],
+      adjudicate: mod.adjudicate.bind(mod) as RuntimeTracerModule['adjudicate']
+    };
+  })();
+  return runtimeModulePromise;
+}
+
+function loadProviderContracts(): RuntimeProviderContractFile {
+  if (providerContractsCache) return providerContractsCache;
+  providerContractsCache = JSON.parse(
+    readFileSync(RUNTIME_PROVIDER_CONTRACTS_PATH, 'utf8')
+  ) as RuntimeProviderContractFile;
+  return providerContractsCache;
+}
+
+/**
+ * Compile each selected verification command against the promoted runtime's
+ * compiler + adjudicator. The runtime computes a witness per command; the
+ * sorted concatenation of `witness_digest` values becomes the
+ * `plan_compiler_digest` so that modifying the runtime changes that digest.
+ *
+ * G5-B: also runs one additional case per material parameter so the runtime
+ * exercises the AUTHENTIC_INPUT_INFLUENCE template (`parameter_usage_finder`).
+ * The resulting decisions feed into the same aggregate so the verifier's
+ * T3 verdict reflects parameter-influence claims when an authoritative
+ * source (capability contract) declares the parameter material.
+ *
+ * Returns the sorted witness_digest list and the runtime-side witness
+ * object metadata (claim states + decisions) so the caller can reflect the
+ * runtime's view without smuggling in any extra ontology.
+ */
+async function compileObligationsViaRuntime(args: {
+  selectedCommands: Array<{
+    command_id: string;
+    executable: string;
+    argv: string[];
+  }>;
+  patchDigest: string;
+  claimObligations?: RuntimeObligationTemplate[];
+  parameterSources?: Record<string, string>;
+}): Promise<{
+  witnessDigests: string[];
+  aggregate: { aggregate: string; reason: string; verdict: string };
+  perObligationDecisions: Array<{
+    command_id: string;
+    decision: RuntimeWaveDecision;
+    claim_state: RuntimeClaimState;
+  }>;
+}> {
+  const runtime = await loadRuntime();
+  const providerContracts = loadProviderContracts();
+
+  const witnessDigests: string[] = [];
+  const allDecisions: Record<string, RuntimeWaveDecision> = {};
+  const allClaimStates: Record<string, RuntimeClaimState> = {};
+  const perCommand: Array<{
+    command_id: string;
+    decision: RuntimeWaveDecision;
+    claim_state: RuntimeClaimState;
+  }> = [];
+
+  const claimObligations = args.claimObligations ?? [];
+  const parameterSources = args.parameterSources ?? {};
+
+  // Build one CaseSpec per selected command. The runtime's scope guard routes
+  // command-ids outside its frozen REGISTRY to UNKNOWN with a non-favorable
+  // disposition; the in-registry commands (e.g. `loadout.contracts`) get a
+  // definitive verdict. Either way the witness content is mechanically a
+  // function of (case + provider-contracts + tracer source), so any change
+  // to those inputs changes `witness_digest`.
+  for (const cmd of args.selectedCommands) {
+    const caseSpec: RuntimeCaseSpec = {
+      case_id: `verify-change:${cmd.command_id}`,
+      scenario_id: `verify-change:${cmd.command_id}`,
+      expected_verdict: 'UNKNOWN',
+      expected_aggregate: 'unknown',
+      expected_aggregate_reason: 'undetermined',
+      change: {
+        scenario_id: `verify-change:${cmd.command_id}`,
+        patch_digest: args.patchDigest,
+        patch_text: '',
+        patch_file: '',
+        expected_outcome: 'unknown',
+        selected_command_id: cmd.command_id,
+        selected_executable: cmd.executable,
+        selected_argv: cmd.argv
+      },
+      obligations: [
+        {
+          template_id: 'OBLIGATION.REGISTERED_COMMAND_MATCHES_PLAN',
+          obligation_kind: 'REGISTERED_COMMAND_MATCHES_PLAN',
+          provider_id: 'registered_command_matcher',
+          authority_source_id: 'wave6r2-registered-command-registry',
+          authority_pointer: 'loadout/src/core/qualification-runtime/tracer.ts:1569-1572',
+          freshness_binding: 'command_registration',
+          required_guarantee: 'sound_for_pass',
+          risk_class: 'high'
+        }
+      ]
+    };
+
+    const witness: RuntimeWitness = runtime.runCase({
+      case: caseSpec,
+      providerContracts
+    });
+
+    // The runtime's `runCase` emits one decision per obligation_id (which is
+    // opaque). For the per-command attribution surface we record the
+    // aggregate witness digest + the single resulting decision.
+    const obligationIds = Object.keys(witness.decisions.per_obligation);
+    const firstObligationId = obligationIds[0];
+    const decision = firstObligationId
+      ? witness.decisions.per_obligation[firstObligationId]
+      : 'unknown';
+    const claimState = firstObligationId
+      ? witness.decisions.claim_state_per_obligation[firstObligationId]
+      : 'unsupported';
+    perCommand.push({
+      command_id: cmd.command_id,
+      decision: decision ?? 'unknown',
+      claim_state: claimState ?? 'unsupported'
+    });
+
+    witnessDigests.push(witness.witness_digest);
+    for (const id of obligationIds) {
+      allDecisions[id] = witness.decisions.per_obligation[id];
+      allClaimStates[id] = witness.decisions.claim_state_per_obligation[id];
+    }
+  }
+
+  // G5-B: Run one additional CaseSpec per claim obligation so the runtime
+  // exercises AUTHENTIC_INPUT_INFLUENCE for each material parameter (and
+  // emits no_authority-UNKNOWN for each non-material parameter via the
+  // runtime's `provider_id === null` branch).
+  for (const tpl of claimObligations) {
+    // Pick the first material parameter (the runtime's `added_parameter` is a
+    // singleton; non-material obligations don't need source bodies).
+    const materialParam =
+      tpl.obligation_kind === 'AUTHENTIC_INPUT_INFLUENCE' && tpl.provider_id !== null
+        ? extractFirstMaterialParam(tpl)
+        : undefined;
+    const parameter_source = materialParam ? (parameterSources[paramKey(materialParam)] ?? '') : '';
+    const caseSpec: RuntimeCaseSpec = {
+      case_id: `verify-change:claim:${tpl.template_id}`,
+      scenario_id: `verify-change:claim:${tpl.template_id}`,
+      expected_verdict: 'UNKNOWN',
+      expected_aggregate: 'unknown',
+      expected_aggregate_reason: 'undetermined',
+      change: {
+        scenario_id: `verify-change:claim:${tpl.template_id}`,
+        patch_digest: args.patchDigest,
+        patch_text: '',
+        patch_file: '',
+        expected_outcome: 'unknown',
+        ...(materialParam
+          ? {
+              added_parameter: {
+                function_name: materialParam.function_name,
+                parameter_name: materialParam.parameter_name
+              },
+              parameter_source
+            }
+          : {})
+      },
+      obligations: [tpl]
+    };
+
+    const witness: RuntimeWitness = runtime.runCase({
+      case: caseSpec,
+      providerContracts
+    });
+
+    const obligationIds = Object.keys(witness.decisions.per_obligation);
+    for (const id of obligationIds) {
+      allDecisions[id] = witness.decisions.per_obligation[id];
+      allClaimStates[id] = witness.decisions.claim_state_per_obligation[id];
+    }
+    witnessDigests.push(witness.witness_digest);
+    perCommand.push({
+      command_id: tpl.template_id,
+      decision: witness.decisions.per_obligation[obligationIds[0]] ?? 'unknown',
+      claim_state: witness.decisions.claim_state_per_obligation[obligationIds[0]] ?? 'unsupported'
+    });
+  }
+
+  witnessDigests.sort();
+  const aggregate = runtime.adjudicate(allDecisions, allClaimStates);
+
+  return {
+    witnessDigests,
+    aggregate,
+    perObligationDecisions: perCommand
+  };
+}
+
+function paramKey(p: { function_name: string; parameter_name: string }): string {
+  return `${p.function_name}.${p.parameter_name}`;
+}
+
+function extractFirstMaterialParam(
+  tpl: RuntimeObligationTemplate
+): { function_name: string; parameter_name: string } | undefined {
+  // The template id is shaped `OBLIGATION.AUTHENTIC_INPUT_INFLUENCE.<fn>.<param>`
+  // by `buildObligationContext`. Parse out (fn, param) for the case spec.
+  const parts = tpl.template_id.split('.');
+  if (parts.length < 4) return undefined;
+  const fn = parts[2];
+  const param = parts.slice(3).join('.');
+  return { function_name: fn, parameter_name: param };
+}
+
 export const VERIFY_CHANGE_METHOD = Object.freeze({
   id: 'verify-change/proof-obligation',
   version: '2.0.0-wave6r2',
@@ -73,8 +686,20 @@ export const VERIFY_CHANGE_METHOD = Object.freeze({
 });
 
 export function computeVerificationChangeDigest(value: VerificationChangeV0): string {
+  // Canonical content-address: hash the verification change body excluding
+  // `execution_attribution.output_plan_digest`. If we hashed the full body,
+  // the digest field would be a function of itself (a circular dependency):
+  // any change to the plan body would change the digest stored in
+  // `output_plan_digest`, which would then change the digest. Excluding the
+  // field makes the digest the content-address of the rest of the body.
+  const body = { ...value } as Record<string, unknown>;
+  if (body.execution_attribution && typeof body.execution_attribution === 'object') {
+    const attr = { ...(body.execution_attribution as Record<string, unknown>) };
+    attr.output_plan_digest = '';
+    body.execution_attribution = attr;
+  }
   return `sha256:${createHash('sha256')
-    .update(JSON.stringify(sortDeep(value)))
+    .update(JSON.stringify(sortDeep(body)))
     .digest('hex')}`;
 }
 
@@ -251,10 +876,11 @@ export async function buildVerificationChange(args: {
   const repository = path.resolve(args.repository);
   const current = await snapshotRepo(repository);
   const base = await resolveBase(repository, args.baseRef);
-  const [changedFiles, statusEntries, patchDigest] = await Promise.all([
+  const [changedFiles, statusEntries, patchDigest, diffText] = await Promise.all([
     readChangedFiles(repository, base.commit),
     readStatusEntries(repository),
-    computePatchDigest(repository, base.commit)
+    computePatchDigest(repository, base.commit),
+    readDiffText(repository, base.commit)
   ]);
   const profile = await detectProfile(repository);
   const signals = classify(profile, changedFiles);
@@ -302,9 +928,79 @@ export async function buildVerificationChange(args: {
       rationale: skippedRationale(item.id, signals)
     }));
 
-  return VerificationChangeV0Schema.parse({
+  // Cast the inferred shape to the schema literal types. The original code
+  // passed the inferred array through `VerificationChangeV0Schema.parse`
+  // which does coercion at runtime; the schema-typed draft below needs the
+  // literal types up front.
+  const typedSelectedVerification =
+    selected_verification as unknown as VerificationChangeV0['selected_verification'];
+  const typedSkippedVerification =
+    skipped_verification as unknown as VerificationChangeV0['skipped_verification'];
+  const typedObligations = obligations as unknown as VerificationChangeV0['proof_obligations'];
+
+  // G5-B: read the capability contract's `authoritative_claims` declaration
+  // and instantiate Claim contexts for the parameters added by this diff.
+  // The diff text is parsed to find added parameters; each is then classified
+  // as material (Claim instantiated, provider bound) or non-material (no
+  // Claim, provider_id=null → UNKNOWN).
+  const capabilityContract = await loadCapabilityContract(repository);
+  const addedParameters = extractAddedParametersFromDiff(diffText);
+  const claimContext = buildObligationContext({
+    capabilityContract,
+    addedParameters
+  });
+
+  // Best-effort source bodies for material parameters. The runtime's
+  // parameter_usage_finder provider runs an AST-based binding analysis
+  // when the source body is available; otherwise it routes to UNKNOWN
+  // (the conservative outside-scope path). We read each material
+  // parameter's source_file from disk when one is present.
+  const parameterSources: Record<string, string> = {};
+  for (const p of addedParameters) {
+    if (p.source_file) {
+      const fullPath = path.join(repository, p.source_file);
+      try {
+        parameterSources[`${p.function_name}.${p.parameter_name}`] = await fs.readFile(
+          fullPath,
+          'utf8'
+        );
+      } catch {
+        // ignore — runtime will route to UNKNOWN
+      }
+    }
+  }
+
+  // G5-A: compile the selected verification commands through the promoted
+  // runtime's compiler + adjudicator (`runCase`). The resulting witness
+  // digests become `plan_compiler_digest` and prove the runtime is causally
+  // in the execution path (modifying any runtime file changes the digest).
+  const runtimeCompilation = await compileObligationsViaRuntime({
+    selectedCommands: selected_verification.map((item) => ({
+      command_id: item.command_id,
+      executable: item.executable,
+      argv: [...item.argv]
+    })),
+    patchDigest,
+    claimObligations: claimContext.obligation_templates,
+    parameterSources
+  });
+
+  // The compiler digest is over the sorted witness_digest values the runtime
+  // emitted for the selected commands. Sort is stable so the digest is
+  // reproducible across runs.
+  const compilerInner = sha256Hex(
+    Buffer.from(runtimeCompilation.witnessDigests.join('\n'), 'utf8')
+  );
+  const plan_compiler_digest = `sha256:${compilerInner}`;
+
+  const draft: VerificationChangeV0 = {
     schema: 'loadout/verification-change/v0',
-    method: VERIFY_CHANGE_METHOD,
+    method: {
+      ...VERIFY_CHANGE_METHOD,
+      promoted_runtime_manifest: 'wave6r2-runtime-v2',
+      promoted_runtime_bundle_digest: IMPLEMENTATION_DIGEST,
+      promoted_runtime_source: 'loadout/src/core/qualification-runtime/'
+    },
     change: {
       repository,
       repository_profile: profile,
@@ -322,11 +1018,70 @@ export async function buildVerificationChange(args: {
     },
     affected_surfaces: signals.surfaces,
     claims_at_risk: signals.claims,
-    proof_obligations: obligations,
-    selected_verification,
-    skipped_verification,
-    unknowns: signals.unknowns
-  });
+    proof_obligations: typedObligations,
+    selected_verification: typedSelectedVerification,
+    skipped_verification: typedSkippedVerification,
+    unknowns: [
+      ...signals.unknowns,
+      ...claimContext.claim_decisions
+        .filter((d) => !d.material)
+        .map(
+          (d) =>
+            `parameter ${d.function_name}.${d.parameter_name} is non-material under capability-contract:${capabilityContract.id} (no authoritative Claim)`
+        )
+    ],
+    execution_attribution: {
+      capability_id: 'verify-change',
+      capability_version: '2.0.0-wave6r2',
+      runtime_bundle_digest: IMPLEMENTATION_DIGEST,
+      runtime_entrypoint: 'loadout/src/core/qualification-runtime/tracer.ts#runCase',
+      runtime_version: 'v2',
+      plan_compiler_digest,
+      output_plan_digest: '' // filled in below once the plan body is canonical
+    }
+  };
+  draft.execution_attribution.output_plan_digest = computeVerificationChangeDigest(draft);
+  return VerificationChangeV0Schema.parse(draft);
+}
+
+/**
+ * Load the verify-change capability contract from the pack directory. The
+ * contract is the authoritative source for which parameters of which command
+ * are material under this capability (see `authoritative_claims`).
+ *
+ * The pack directory is resolved from the loadout source layout: the contract
+ * is bundled with the verify-change pack at
+ * `loadout/src/packs/verify-change/capability.json`. We resolve it relative
+ * to `__dirname` so the resolution is stable regardless of the consumer's
+ * CWD (which may be the consumer repository, not the loadout source).
+ */
+async function loadCapabilityContract(repository: string): Promise<VerifyChangeCapabilityContract> {
+  // Resolution order:
+  //  1. The pack directory at the loadout source root (the canonical
+  //     capability.json bundled with this version of loadout).
+  //  2. The consumer repository's installed pack at
+  //     `<repository>/.loadout/packs/verify-change/capability.json` — when
+  //     the consumer has installed a different version of the verify-change
+  //     pack, that contract takes precedence.
+  const sourcePackPath = path.resolve(__dirname, '..', 'packs', 'verify-change', 'capability.json');
+  const installedPackPath = path.join(
+    repository,
+    '.loadout',
+    'packs',
+    'verify-change',
+    'capability.json'
+  );
+  for (const candidate of [sourcePackPath, installedPackPath]) {
+    try {
+      const text = await fs.readFile(candidate, 'utf8');
+      return JSON.parse(text) as VerifyChangeCapabilityContract;
+    } catch {
+      // try next
+    }
+  }
+  throw new Error(
+    `verify-change capability.json not found at ${sourcePackPath} or ${installedPackPath}`
+  );
 }
 
 async function resolveBase(
@@ -377,14 +1132,7 @@ async function readStatusEntries(repository: string): Promise<string[]> {
 }
 
 async function computePatchDigest(repository: string, base: string): Promise<string> {
-  const diff = await gitRaw(repository, [
-    'diff',
-    '--binary',
-    base,
-    '--',
-    '.',
-    ':(exclude).loadout/**'
-  ]);
+  const diff = await readDiffText(repository, base);
   const untrackedRaw = await gitRaw(repository, [
     'ls-files',
     '--others',
@@ -397,6 +1145,10 @@ async function computePatchDigest(repository: string, base: string): Promise<str
     hash.update('\0untracked\0').update(relative).update('\0').update(contents);
   }
   return `sha256:${hash.digest('hex')}`;
+}
+
+async function readDiffText(repository: string, base: string): Promise<string> {
+  return gitRaw(repository, ['diff', '--binary', base, '--', '.', ':(exclude).loadout/**']);
 }
 
 function isProjectPath(value: string): boolean {

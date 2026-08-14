@@ -44,7 +44,14 @@ export { snapshotRepo, computeWorkspaceStateDigest } from './core/snapshot';
 export {
   buildVerificationChange,
   computeVerificationChangeDigest,
-  VERIFY_CHANGE_METHOD
+  VERIFY_CHANGE_METHOD,
+  buildObligationContext,
+  extractAddedParametersFromDiff
+} from './core/verification';
+export type {
+  AddedParameter,
+  BuiltObligationContext,
+  VerifyChangeCapabilityContract
 } from './core/verification';
 
 export {
@@ -129,7 +136,8 @@ export type {
   UnknownV1,
   RepositoryStateObservationV1,
   VerificationChangeV0,
-  VerificationCommandV0
+  VerificationCommandV0,
+  ExecutionAttributionV0
 } from './core/schemas';
 export { ReconResultV1Schema, ReconResultV2Schema, ReconResultSchema } from './core/schemas';
 
